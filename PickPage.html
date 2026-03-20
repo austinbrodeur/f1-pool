@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg: #0d0d0d; --card: #161616; --card-alt: #1c1c1c; --border: #2a2a2a;
+    --text: #e8e8e8; --dim: #777; --muted: #444;
+    --accent: #00d4aa; --red: #e10600; --gold: #d4a017;
+  }
+  body { font-family: 'Barlow', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+  .container { max-width: 900px; margin: 0 auto; padding: 0 12px 60px; }
+  .main-layout { display: flex; gap: 16px; margin-top: 14px; }
+  .picks-area { flex: 1; min-width: 0; }
+  .pool-area { width: 240px; flex-shrink: 0; }
+  @media (max-width: 720px) {
+    .main-layout { flex-direction: row; }
+    .pool-area { width: 180px; }
+  }
+
+  /* Header */
+  .hdr { background: linear-gradient(135deg, #1a472a 0%, #0a1f12 100%); padding: 20px 16px; text-align: center; border-bottom: 2px solid var(--accent); }
+  .hdr h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 800; text-transform: uppercase; letter-spacing: 3px; }
+  .hdr .sub { font-size: 14px; color: rgba(255,255,255,.6); margin-top: 2px; }
+  .hdr .tag { display: inline-block; background: rgba(0,212,170,.12); border: 1px solid var(--accent); color: var(--accent); padding: 3px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-top: 8px; letter-spacing: .5px; }
+
+  /* Deadline */
+  .dl { background: rgba(255,193,7,.08); border: 1px solid rgba(255,193,7,.25); border-radius: 8px; padding: 10px 14px; text-align: center; margin: 14px 0; font-size: 13px; }
+  .dl strong { color: var(--gold); }
+  .dl.past { background: rgba(225,6,0,.08); border-color: rgba(225,6,0,.25); }
+  .dl.past strong { color: var(--red); }
+  .cd { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 700; color: var(--gold); margin-top: 3px; letter-spacing: 1px; }
+  .dl.past .cd { color: var(--red); }
+
+  /* Section labels */
+  .lbl { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 2.5px; color: var(--dim); margin: 20px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .lbl .hint { font-family: 'Barlow', sans-serif; font-weight: 400; font-size: 11px; letter-spacing: 0; text-transform: none; color: var(--muted); }
+
+  /* Team colors */
+  .t-redbull { --tc: #3671C6; } .t-mclaren { --tc: #FF8000; } .t-mercedes { --tc: #27F4D2; }
+  .t-ferrari { --tc: #E8002D; } .t-williams { --tc: #64C4FF; } .t-racingbulls { --tc: #6692FF; }
+  .t-astonmartin { --tc: #229971; } .t-haas { --tc: #B6BABD; } .t-audi { --tc: #FF4C4C; }
+  .t-alpine { --tc: #FF87BC; } .t-cadillac { --tc: #FFD700; }
+
+  /* Driver chip (in pool) */
+  .chip {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 8px; cursor: grab; user-select: none;
+    transition: border-color .15s, border-width .15s, color .15s;
+    border-left: 3px solid var(--tc);
+    position: relative;
+  }
+  .chip:active { cursor: grabbing; }
+  .chip .code { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px; letter-spacing: .5px; transition: color .15s; }
+  .chip .name { display: none; }
+  .chip .team-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tc); flex-shrink: 0; position: absolute; top: 4px; right: 4px; }
+
+  /* Position indicators */
+  .chip.p1 { border: 2px solid #FFD700; border-left: 3px solid #FFD700; }
+  .chip.p2 { border: 2px solid #C0C0C0; border-left: 3px solid #C0C0C0; }
+  .chip.p3 { border: 2px solid #CD7F32; border-left: 3px solid #CD7F32; }
+  .chip.in-top10 { border: 2px solid var(--tc); border-left: 3px solid var(--tc); }
+  .chip.pole .code { color: #9b59b6; }
+
+  /* Driver pool grid */
+  .pool { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+
+  /* Team section in pool */
+  .team-grp { margin-bottom: 12px; }
+  .team-name { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin-bottom: 4px; padding-left: 4px; }
+
+  /* Drop zone (slot) */
+  .slot {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; min-height: 46px; margin-bottom: 4px;
+    transition: border-color .15s, background .15s;
+  }
+  .slot.drag-over { border-color: var(--accent); background: rgba(0,212,170,.05); }
+  .slot.pole-slot.drag-over { border-color: var(--gold); background: rgba(212,160,23,.05); }
+  .slot.filled { border-left: 3px solid var(--accent); }
+  .slot.pole-slot.filled { border-left: 3px solid var(--gold); }
+
+  /* Drag handle */
+  .drag-handle {
+    cursor: grab; padding: 4px; color: var(--muted); font-size: 14px;
+    display: none; flex-direction: column; gap: 2px; user-select: none;
+  }
+  .drag-handle:active { cursor: grabbing; }
+  .slot.filled .drag-handle { display: flex; }
+  .drag-handle span { width: 16px; height: 2px; background: var(--muted); border-radius: 1px; }
+
+
+  .slot .pos {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 16px;
+    color: var(--muted); width: 34px; text-align: center; flex-shrink: 0;
+  }
+  .slot.filled .pos { color: var(--text); }
+  .slot.pole-slot .pos { color: var(--gold); font-size: 13px; font-weight: 800; letter-spacing: .5px; }
+
+  .slot .empty { font-size: 12px; color: var(--muted); flex: 1; }
+  .slot .placed {
+    display: flex; align-items: center; gap: 8px; flex: 1;
+    font-size: 14px; cursor: grab;
+  }
+  .slot .placed:active { cursor: grabbing; }
+  .slot .placed .code { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; }
+  .slot .placed .pname { color: var(--dim); font-size: 12px; }
+  .slot .placed .pdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  @media (max-width: 720px) {
+    .slot .placed .pname { display: none; }
+  }
+
+  .slot .rm {
+    background: none; border: none; color: var(--muted); font-size: 16px;
+    cursor: pointer; padding: 4px 6px; border-radius: 4px; flex-shrink: 0;
+    opacity: 0; transition: opacity .15s;
+  }
+  .slot.filled .rm { opacity: 1; }
+  .slot .rm:hover { color: var(--red); background: rgba(225,6,0,.1); }
+
+  /* Progress */
+  .pbar { background: var(--card); border-radius: 20px; height: 6px; margin: 16px 0 4px; border: 1px solid var(--border); overflow: hidden; }
+  .pfill { height: 100%; background: linear-gradient(90deg, var(--accent), #2d6b45); border-radius: 20px; transition: width .3s; }
+  .ptxt { font-size: 11px; color: var(--dim); text-align: right; margin-bottom: 12px; }
+
+  /* Submit */
+  .sbtn {
+    width: 100%; padding: 14px; font-family: 'Barlow Condensed', sans-serif;
+    font-size: 17px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;
+    border: none; border-radius: 8px; cursor: pointer; transition: all .15s;
+    background: var(--red); color: white;
+  }
+  .sbtn:hover:not(:disabled) { filter: brightness(1.15); transform: translateY(-1px); }
+  .sbtn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+  /* Reset button */
+  .rbtn {
+    width: 100%; padding: 10px; font-family: 'Barlow Condensed', sans-serif;
+    font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;
+    border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all .15s;
+    background: transparent; color: var(--muted); margin-top: 8px;
+  }
+  .rbtn:hover { border-color: var(--red); color: var(--red); background: rgba(225,6,0,.05); }
+
+  /* Status */
+  .st { text-align: center; padding: 12px; border-radius: 8px; margin-top: 10px; font-size: 13px; display: none; }
+  .st.ok { display: block; background: rgba(0,212,170,.08); border: 1px solid var(--accent); color: var(--accent); }
+  .st.err { display: block; background: rgba(225,6,0,.08); border: 1px solid var(--red); color: #ff6666; }
+
+  .existing { background: rgba(0,212,170,.06); border: 1px solid rgba(0,212,170,.15); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: var(--accent); }
+
+  .loading { text-align: center; padding: 80px 20px; color: var(--dim); }
+  .spin { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: sp .7s linear infinite; margin: 0 auto 14px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .err-page { text-align: center; padding: 80px 20px; color: var(--red); }
+
+  /* Touch drag ghost */
+  .drag-ghost {
+    position: fixed; pointer-events: none; z-index: 9999;
+    background: var(--card-alt); border: 1px solid var(--accent);
+    border-radius: 6px; padding: 8px 12px; font-size: 14px;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    transform: translate(-50%, -50%);
+  }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading"><div class="spin"></div>Loading picks...</div>
+
+<div id="app" style="display:none;">
+  <div class="hdr">
+    <h1>🏎️ F1 Pool 2026</h1>
+    <div class="sub" id="rInfo"></div>
+    <div class="tag" id="pTag"></div>
+  </div>
+  <div class="container">
+    <div class="dl" id="dlBanner"><span>Deadline: <strong id="dlTxt"></strong></span><div class="cd" id="cdTxt"></div></div>
+    <div id="existNote" class="existing" style="display:none;">✅ Previous submission loaded. Adjust and resubmit, or leave as-is.</div>
+
+    <div class="main-layout">
+      <div class="picks-area">
+        <div class="lbl"><span>Pole Position</span><span class="hint">Drag to select</span></div>
+        <div id="poleSlot"></div>
+
+        <div class="lbl"><span>Top 10 Finishing Order</span><span class="hint">Drag to reorder</span></div>
+        <div id="posSlots"></div>
+
+        <div class="pbar"><div class="pfill" id="pFill"></div></div>
+        <div class="ptxt" id="pTxt">0 / 11</div>
+
+        <button class="sbtn" id="sBtn" disabled onclick="doSubmit()">Submit Picks</button>
+        <button class="rbtn" onclick="resetPicks()">Reset All Picks</button>
+        <div class="st" id="stMsg"></div>
+      </div>
+
+      <div class="pool-area">
+        <div class="lbl"><span>Drivers</span></div>
+        <div id="driverPool"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="errPage" class="err-page" style="display:none;"><h2>⚠️</h2><p id="errTxt"></p></div>
+
+<script>
+const token = <?!= JSON.stringify(token) ?>;
+let PD = null; // page data
+let slots = { pole: null, p: Array(10).fill(null) }; // placed driver codes
+let submitting = false;
+let ghostEl = null;
+let dragCode = null;
+let dragSource = null; // 'pool' | 'pole' | 'p3' etc
+
+const TEAM_ORDER = ["Red Bull","McLaren","Mercedes","Ferrari","Williams","Racing Bulls","Aston Martin","Haas","Audi","Alpine","Cadillac"];
+const TEAM_CSS = {"Red Bull":"t-redbull","McLaren":"t-mclaren","Mercedes":"t-mercedes","Ferrari":"t-ferrari","Williams":"t-williams","Racing Bulls":"t-racingbulls","Aston Martin":"t-astonmartin","Haas":"t-haas","Audi":"t-audi","Alpine":"t-alpine","Cadillac":"t-cadillac"};
+const TEAM_CLR = {"Red Bull":"#3671C6","McLaren":"#FF8000","Mercedes":"#27F4D2","Ferrari":"#E8002D","Williams":"#64C4FF","Racing Bulls":"#6692FF","Aston Martin":"#229971","Haas":"#B6BABD","Audi":"#FF4C4C","Alpine":"#FF87BC","Cadillac":"#FFD700"};
+
+google.script.run.withSuccessHandler(init).withFailureHandler(e => showErr(e.message)).getPickPageData(token);
+
+function init(d) {
+  document.getElementById('loading').style.display = 'none';
+  if (d.error) { showErr(d.error); return; }
+  PD = d;
+  document.getElementById('rInfo').textContent = `Round ${d.roundNum}: ${d.raceName} — ${d.raceDate}`;
+  document.getElementById('pTag').textContent = d.playerName;
+  document.getElementById('dlTxt').textContent = d.deadlineDisplay;
+  if (d.isPastDeadline) {
+    document.getElementById('dlBanner').classList.add('past');
+    document.getElementById('cdTxt').textContent = 'DEADLINE PASSED';
+    document.getElementById('sBtn').disabled = true;
+    document.getElementById('sBtn').textContent = 'Deadline Passed';
+  } else { startCD(new Date(d.deadline)); }
+
+  // Build pole slot
+  document.getElementById('poleSlot').innerHTML = makeSlot('pole', 'POLE');
+
+  // Build P1-P10 slots
+  let h = '';
+  for (let i = 1; i <= 10; i++) h += makeSlot('p' + i, 'P' + i);
+  document.getElementById('posSlots').innerHTML = h;
+
+  // Build driver pool grouped by team
+  const byTeam = {};
+  d.drivers.forEach(dr => { (byTeam[dr.team] = byTeam[dr.team] || []).push(dr); });
+  let poolHTML = '';
+  TEAM_ORDER.forEach(team => {
+    if (!byTeam[team]) return;
+    poolHTML += `<div class="team-grp"><div class="team-name">${team}</div><div class="pool">`;
+    byTeam[team].forEach(dr => {
+      poolHTML += `<div class="chip ${TEAM_CSS[dr.team]}" id="chip-${dr.code}" draggable="true"
+        data-code="${dr.code}" data-name="${dr.name}" data-team="${dr.team}"
+        ontouchstart="tStart(event,'${dr.code}','pool')" ontouchmove="tMove(event)" ontouchend="tEnd(event)"
+        ondragstart="dStart(event,'${dr.code}','pool')">
+        <span class="code">${dr.code}</span><span class="name">${dr.name}</span><span class="team-dot"></span>
+      </div>`;
+    });
+    poolHTML += '</div></div>';
+  });
+  document.getElementById('driverPool').innerHTML = poolHTML;
+
+  // Setup drop targets
+  document.querySelectorAll('.slot').forEach(el => {
+    el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
+    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+    el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('drag-over'); dropOn(el.dataset.slot); });
+  });
+
+  // Load existing picks
+  if (d.existingPicks) {
+    document.getElementById('existNote').style.display = 'block';
+    if (d.existingPicks.pole) place('pole', d.existingPicks.pole);
+    if (d.existingPicks.positions) d.existingPicks.positions.forEach((c, i) => { if (c) place('p' + (i + 1), c); });
+  }
+
+  refresh();
+  document.getElementById('app').style.display = 'block';
+}
+
+function makeSlot(id, label) {
+  const cls = id === 'pole' ? 'slot pole-slot' : 'slot';
+  return `<div class="${cls}" id="slot-${id}" data-slot="${id}">
+    <div class="drag-handle" draggable="true"
+      ondragstart="dStart(event, null, '${id}')"
+      ontouchstart="handleTStart(event,'${id}')" ontouchmove="tMove(event)" ontouchend="tEnd(event)">
+      <span></span><span></span><span></span>
+    </div>
+    <div class="pos">${label}</div>
+    <div class="empty" id="empty-${id}">Drag driver here</div>
+    <div class="placed" id="placed-${id}" style="display:none;"
+      draggable="true"
+      ondragstart="dStart(event, null, '${id}')"
+      ontouchstart="handleTStart(event,'${id}')" ontouchmove="tMove(event)" ontouchend="tEnd(event)">
+    </div>
+    <button class="rm" onclick="remove('${id}')" title="Remove">✕</button>
+  </div>`;
+}
+
+function place(slotId, code) {
+  const dr = PD.drivers.find(d => d.code === code);
+  if (!dr) return;
+
+  if (slotId === 'pole') {
+    slots.pole = code;
+  } else {
+    const idx = parseInt(slotId.substring(1)) - 1;
+
+    // If this driver is already in another P slot, clear it
+    const prevIdx = slots.p.indexOf(code);
+    if (prevIdx !== -1 && prevIdx !== idx) {
+      slots.p[prevIdx] = null;
+      renderSlot('p' + (prevIdx + 1));
+    }
+
+    slots.p[idx] = code;
+  }
+  renderSlot(slotId);
+  refresh();
+}
+
+function remove(slotId) {
+  if (slotId === 'pole') slots.pole = null;
+  else slots.p[parseInt(slotId.substring(1)) - 1] = null;
+  renderSlot(slotId);
+  refresh();
+}
+
+function renderSlot(slotId) {
+  const code = slotId === 'pole' ? slots.pole : slots.p[parseInt(slotId.substring(1)) - 1];
+  const el = document.getElementById('slot-' + slotId);
+  const emptyEl = document.getElementById('empty-' + slotId);
+  const placedEl = document.getElementById('placed-' + slotId);
+
+  if (code) {
+    const dr = PD.drivers.find(d => d.code === code);
+    const clr = TEAM_CLR[dr.team] || '#888';
+    el.classList.add('filled');
+    emptyEl.style.display = 'none';
+    placedEl.style.display = 'flex';
+    placedEl.innerHTML = `<span class="pdot" style="background:${clr}"></span><span class="code">${code}</span><span class="pname">${dr.name}</span>`;
+  } else {
+    el.classList.remove('filled');
+    emptyEl.style.display = '';
+    placedEl.style.display = 'none';
+    placedEl.innerHTML = '';
+  }
+}
+
+
+function refresh() {
+  // Update chip visual indicators
+  PD.drivers.forEach(dr => {
+    const chip = document.getElementById('chip-' + dr.code);
+    if (!chip) return;
+
+    // Remove all position classes
+    chip.classList.remove('p1', 'p2', 'p3', 'in-top10', 'pole');
+
+    // Check if driver is pole
+    if (slots.pole === dr.code) {
+      chip.classList.add('pole');
+    }
+
+    // Check position in top 10
+    const posIdx = slots.p.indexOf(dr.code);
+    if (posIdx !== -1) {
+      if (posIdx === 0) chip.classList.add('p1'); // P1 = gold
+      else if (posIdx === 1) chip.classList.add('p2'); // P2 = silver
+      else if (posIdx === 2) chip.classList.add('p3'); // P3 = bronze
+      else chip.classList.add('in-top10'); // P4-P10 = team color border
+    }
+  });
+
+  // Progress
+  let n = (slots.pole ? 1 : 0) + slots.p.filter(c => c).length;
+  document.getElementById('pFill').style.width = (n / 11 * 100) + '%';
+  document.getElementById('pTxt').textContent = n + ' / 11';
+
+  const btn = document.getElementById('sBtn');
+  if (!PD.isPastDeadline) {
+    btn.disabled = n < 11;
+    btn.textContent = n < 11 ? `Submit Picks (${11 - n} remaining)` : 'Submit Picks';
+  }
+}
+
+function resetPicks() {
+  if (!confirm('Are you sure you want to reset all picks? This will clear your current selections.')) return;
+
+  slots.pole = null;
+  slots.p = Array(10).fill(null);
+
+  // Re-render all slots
+  renderSlot('pole');
+  for (let i = 1; i <= 10; i++) renderSlot('p' + i);
+
+  refresh();
+
+  // Clear status message
+  const st = document.getElementById('stMsg');
+  st.style.display = 'none';
+}
+
+// ── Drag & Drop (desktop) ──
+function dStart(e, code, source) {
+  // If code is null, we're dragging from a slot via the drag handle
+  if (code === null) {
+    const slotId = source;
+    code = slotId === 'pole' ? slots.pole : slots.p[parseInt(slotId.substring(1)) - 1];
+    if (!code) {
+      e.preventDefault();
+      return;
+    }
+  }
+  dragCode = code;
+  dragSource = source;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', code);
+}
+
+function dropOn(slotId) {
+  if (!dragCode) return;
+
+  // Check if target slot is already occupied
+  const targetCode = slotId === 'pole' ? slots.pole : slots.p[parseInt(slotId.substring(1)) - 1];
+
+  if (targetCode && dragSource !== 'pool') {
+    // SWAP VALIDATION: Only check for duplicates when swapping involves pole position
+    const isPoleSwap = dragSource === 'pole' || slotId === 'pole';
+
+    if (isPoleSwap) {
+      // Case 1: Swapping FROM pole INTO top 10 - check if dragCode already exists in top 10
+      if (dragSource === 'pole' && slotId !== 'pole') {
+        const targetIdx = parseInt(slotId.substring(1)) - 1;
+        // Check if dragCode exists anywhere else in top 10 (excluding target slot)
+        for (let i = 0; i < slots.p.length; i++) {
+          if (i !== targetIdx && slots.p[i] === dragCode) {
+            // Cancel swap - dragCode already in top 10
+            dragCode = null; dragSource = null;
+            return;
+          }
+        }
+      }
+
+      // Case 2: Swapping INTO pole FROM top 10 - check if targetCode (being evicted from pole) exists in top 10
+      if (slotId === 'pole' && dragSource !== 'pole') {
+        const sourceIdx = parseInt(dragSource.substring(1)) - 1;
+        // Check if targetCode exists anywhere else in top 10 (excluding source slot)
+        for (let i = 0; i < slots.p.length; i++) {
+          if (i !== sourceIdx && slots.p[i] === targetCode) {
+            // Cancel swap - targetCode already in top 10
+            dragCode = null; dragSource = null;
+            return;
+          }
+        }
+      }
+    }
+
+    // Swap: put target driver in source slot, dragged driver in target slot
+    if (slotId === 'pole') {
+      slots.pole = dragCode;
+    } else {
+      const targetIdx = parseInt(slotId.substring(1)) - 1;
+      slots.p[targetIdx] = dragCode;
+    }
+
+    if (dragSource === 'pole') {
+      slots.pole = targetCode;
+    } else {
+      const sourceIdx = parseInt(dragSource.substring(1)) - 1;
+      slots.p[sourceIdx] = targetCode;
+    }
+
+    renderSlot(slotId);
+    renderSlot(dragSource);
+  } else if (dragSource && dragSource !== 'pool') {
+    // Moving from one slot to empty slot - clear old slot then place
+    if (dragSource === 'pole') {
+      slots.pole = null;
+    } else {
+      const sourceIdx = parseInt(dragSource.substring(1)) - 1;
+      slots.p[sourceIdx] = null;
+    }
+    renderSlot(dragSource);
+    place(slotId, dragCode);
+  } else {
+    // Dragging from pool - just place
+    place(slotId, dragCode);
+  }
+
+  refresh();
+  dragCode = null; dragSource = null;
+}
+
+// ── Touch drag (mobile) ──
+function tStart(e, code, source) {
+  e.preventDefault();
+  dragCode = code; dragSource = source;
+  const t = e.touches[0];
+  ghostEl = document.createElement('div');
+  ghostEl.className = 'drag-ghost';
+  ghostEl.textContent = code;
+  ghostEl.style.left = t.clientX + 'px';
+  ghostEl.style.top = t.clientY + 'px';
+  document.body.appendChild(ghostEl);
+}
+
+function handleTStart(e, slotId) {
+  // Called from drag handle
+  const code = slotId === 'pole' ? slots.pole : slots.p[parseInt(slotId.substring(1)) - 1];
+  if (!code) return;
+  tStart(e, code, slotId);
+}
+
+function slotTStart(e, slotId) {
+  const code = slotId === 'pole' ? slots.pole : slots.p[parseInt(slotId.substring(1)) - 1];
+  if (!code) return;
+  tStart(e, code, slotId);
+}
+
+function tMove(e) {
+  if (!ghostEl) return;
+  e.preventDefault();
+  const t = e.touches[0];
+  ghostEl.style.left = t.clientX + 'px';
+  ghostEl.style.top = t.clientY + 'px';
+
+  // Highlight slot under finger
+  document.querySelectorAll('.slot').forEach(el => el.classList.remove('drag-over'));
+  const under = document.elementFromPoint(t.clientX, t.clientY);
+  if (under) {
+    const slot = under.closest('.slot');
+    if (slot) slot.classList.add('drag-over');
+  }
+}
+
+function tEnd(e) {
+  if (!ghostEl) return;
+  const t = e.changedTouches[0];
+  const under = document.elementFromPoint(t.clientX, t.clientY);
+  if (ghostEl.parentNode) ghostEl.parentNode.removeChild(ghostEl);
+  ghostEl = null;
+
+  document.querySelectorAll('.slot').forEach(el => el.classList.remove('drag-over'));
+
+  if (under) {
+    const slot = under.closest('.slot');
+    if (slot && dragCode) {
+      // Use the same dropOn logic as desktop drag-and-drop for consistency
+      dropOn(slot.dataset.slot);
+      return; // dropOn handles cleanup of dragCode/dragSource
+    }
+  }
+  dragCode = null; dragSource = null;
+}
+
+// ── Submit ──
+function doSubmit() {
+  if (submitting) return;
+  submitting = true;
+  const btn = document.getElementById('sBtn');
+  btn.disabled = true; btn.textContent = 'Submitting...';
+  const st = document.getElementById('stMsg'); st.style.display = 'none';
+
+  google.script.run
+    .withSuccessHandler(r => {
+      submitting = false;
+      if (r.error) { st.className = 'st err'; st.textContent = r.error; st.style.display = 'block'; btn.disabled = false; btn.textContent = 'Submit Picks'; }
+      else { st.className = 'st ok'; st.textContent = '✅ ' + r.message; st.style.display = 'block'; btn.disabled = false; btn.textContent = 'Resubmit Picks'; document.getElementById('existNote').style.display = 'block'; }
+    })
+    .withFailureHandler(err => {
+      submitting = false; st.className = 'st err'; st.textContent = err.message; st.style.display = 'block'; btn.disabled = false; btn.textContent = 'Submit Picks';
+    })
+    .submitPicks(token, { pole: slots.pole, positions: slots.p });
+}
+
+function startCD(dl) {
+  (function u() {
+    const d = dl - new Date();
+    if (d <= 0) { document.getElementById('cdTxt').textContent = 'DEADLINE PASSED'; document.getElementById('dlBanner').classList.add('past'); document.getElementById('sBtn').disabled = true; document.getElementById('sBtn').textContent = 'Deadline Passed'; return; }
+    const dd = Math.floor(d/864e5), hh = Math.floor(d%864e5/36e5), mm = Math.floor(d%36e5/6e4), ss = Math.floor(d%6e4/1e3);
+    document.getElementById('cdTxt').textContent = (dd?dd+'d ':'') + hh+'h '+mm+'m '+ss+'s';
+    requestAnimationFrame(u);
+  })();
+}
+
+function showErr(m) { document.getElementById('loading').style.display='none'; document.getElementById('errPage').style.display='block'; document.getElementById('errTxt').textContent=m; }
+</script>
+</body>
+</html>
