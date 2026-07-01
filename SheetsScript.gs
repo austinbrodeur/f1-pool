@@ -30,7 +30,8 @@ function onOpen() {
       .addItem("Create & Email Web Picks for Next Race", "createWebPicksForNextRace")
       .addItem("Create & Email Web Picks for Specific Race...", "createWebPicksPrompt")
       .addItem("Re-send Pick Link to All Players...", "resendWebLinksAll")
-      .addItem("Re-send Pick Link to Specific Player...", "resendWebLinkToPlayer"))
+      .addItem("Re-send Pick Link to Specific Player...", "resendWebLinkToPlayer")
+      .addItem("Re-send Locked Picks Email...", "resendLockedPicksEmailPrompt"))
     .addSubMenu(SpreadsheetApp.getUi().createMenu("🔒 Lock & Import")
       .addItem("Lock Picks for Next Unlocked Race", "lockPicksForNextRace")
       .addItem("Lock Picks for Specific Race...", "lockPicksPrompt"))
@@ -43,7 +44,8 @@ function onOpen() {
       .addItem("View Submission Status for Race...", "viewSubmissionStatus")
       .addSeparator()
       .addItem("Create Teams Config Sheet", "createTeamsConfigSheet")
-      .addItem("Create / Refresh Public Results", "rebuildPublicResults"))
+      .addItem("Create / Refresh Public Results", "rebuildPublicResults")
+      .addItem("Check Public Results Access", "checkPublicResultsAccess"))
     .addToUi();
 }
 
@@ -154,11 +156,6 @@ function sendWebLinksToPlayers(roundNum, specificEmail) {
   const race = getRaceByRound(ss, roundNum);
   if (!race) { ui.alert("Invalid round."); return; }
 
-  const props = PropertiesService.getScriptProperties();
-  const linksJson = props.getProperty(`form_links_${roundNum}`);
-  if (!linksJson) { ui.alert(`No pick links found for Round ${roundNum}. Create them first.`); return; }
-
-  const playerLinks = JSON.parse(linksJson);
   const deadline = getDeadline(race, settings);
   const deadlineStr = Utilities.formatDate(deadline, settings.timeZone, "EEEE, MMM d 'at' h:mm a");
   const poolName = `${settings.poolName} ${settings.seasonYear}`;
@@ -168,8 +165,7 @@ function sendWebLinksToPlayers(roundNum, specificEmail) {
   players.forEach(player => {
     if (!player.email) return;
     if (specificEmail && player.email !== specificEmail) return;
-    const playerUrl = playerLinks[player.name];
-    if (!playerUrl) return;
+    const playerUrl = WEB_APP_URL + "?t=" + encodeURIComponent(generateToken(player.name, roundNum));
     try {
       MailApp.sendEmail({
         to: player.email,
@@ -423,6 +419,26 @@ function sendLockedPicksEmails_(ss, race, pickUrl, summaryUrl) {
 
   props.setProperty(propertyKey, JSON.stringify(Array.from(notifiedEmails)));
   return { sent: sent, alreadySent: alreadySent, total: players.length };
+}
+
+function resendLockedPicksEmailPrompt() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt("Re-send Locked Picks Email", "Enter round number:", ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  const roundNum = parseInt(response.getResponseText(), 10);
+  const race = getRaceByRound(ss, roundNum);
+  if (!race) { ui.alert("Invalid round."); return; }
+  if (!findSheet(ss, `R${roundNum} Picks`)) { ui.alert("No locked picks sheet exists for that round."); return; }
+
+  try {
+    const publicLinks = syncPublicResults_(ss);
+    PropertiesService.getScriptProperties().deleteProperty(`locked_picks_emailed_R${roundNum}`);
+    const delivery = sendLockedPicksEmails_(ss, race, publicLinks.pickUrls[roundNum], publicLinks.summaryUrl);
+    ui.alert(`Locked-picks email sent to ${delivery.sent} / ${delivery.total} players.`);
+  } catch (e) {
+    ui.alert("Locked Picks Email Error", e.message, ui.ButtonSet.OK);
+  }
 }
 
 function buildLockedPicksEmail_(playerName, race, poolName, pickUrl, summaryUrl) {

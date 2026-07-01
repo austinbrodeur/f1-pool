@@ -269,7 +269,7 @@ function createAndEmailWebPicks(roundNum) {
   playersWithEmail.forEach(player => {
     try {
       const token = generateToken(player.name, roundNum);
-      const pickUrl = WEB_APP_URL + "?t=" + token;
+      const pickUrl = WEB_APP_URL + "?t=" + encodeURIComponent(token);
       playerLinks[player.name] = pickUrl;
 
       MailApp.sendEmail({

@@ -24,11 +24,42 @@ function rebuildPublicResults() {
   }
 }
 
+function checkPublicResultsAccess() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty(PUBLIC_RESULTS_ID_PROPERTY);
+  if (!id) {
+    ui.alert("Public Results Access", "No public results workbook exists yet. Run Create / Refresh Public Results first.", ui.ButtonSet.OK);
+    return;
+  }
+
+  try {
+    const ss = SpreadsheetApp.openById(id);
+    const status = ensurePublicResultsSharing_(ss);
+    const file = DriveApp.getFileById(id);
+    const resourceKey = file.getResourceKey();
+    const viewers = file.getViewers().map(user => user.getEmail()).filter(Boolean);
+    ui.alert(
+      "Public Results Access",
+      `Sharing: ${status.access} / ${status.permission}\n` +
+      `Named viewers: ${viewers.length}\n` +
+      `Resource key: ${resourceKey ? "included in generated links" : "not required"}\n` +
+      (status.error ? `Sharing warning: ${status.error}\n` : "") +
+      `\nTest this URL in a private/incognito window:\n${makePublicSheetUrl_(getPublicResultsBaseUrl_(ss), ss.getSheetByName("Summary").getSheetId())}`,
+      ui.ButtonSet.OK
+    );
+  } catch (e) {
+    ui.alert("Public Results Access Error", e.message, ui.ButtonSet.OK);
+  }
+}
+
 function syncPublicResults_(sourceSs) {
   const settings = getPoolSettings(sourceSs);
   const races = getRaces(sourceSs);
   const publicSs = getOrCreatePublicResultsSpreadsheet_(settings);
+  const sharingStatus = ensurePublicResultsSharing_(publicSs);
   syncPublicViewers_(publicSs, getPlayers(sourceSs));
+  const publicBaseUrl = getPublicResultsBaseUrl_(publicSs);
 
   const raceResults = [];
   const playerNames = new Set(getPlayers(sourceSs).map(player => player.name));
@@ -55,7 +86,7 @@ function syncPublicResults_(sourceSs) {
     const sheetName = makePublicRaceSheetName_(result.race);
     const targetSheet = ensurePublicSheet_(publicSs, sheetName);
     writePublicRaceSheet_(targetSheet, result);
-    raceUrls[result.race.round] = `${publicSs.getUrl()}#gid=${targetSheet.getSheetId()}`;
+    raceUrls[result.race.round] = makePublicSheetUrl_(publicBaseUrl, targetSheet.getSheetId());
   });
 
   const pickUrls = {};
@@ -65,7 +96,7 @@ function syncPublicResults_(sourceSs) {
     const sourcePickSheet = sourceSs.getSheetByName(sourcePickSheetName);
     const targetSheet = ensurePublicSheet_(publicSs, makePublicPickSheetName_(race));
     writePublicPickSheet_(targetSheet, sourcePickSheet.getDataRange().getValues());
-    pickUrls[race.round] = `${publicSs.getUrl()}#gid=${targetSheet.getSheetId()}`;
+    pickUrls[race.round] = makePublicSheetUrl_(publicBaseUrl, targetSheet.getSheetId());
   });
 
   movePublicSheet_(publicSs, summarySheet, 1);
@@ -75,9 +106,10 @@ function syncPublicResults_(sourceSs) {
 
   const links = {
     spreadsheetId: publicSs.getId(),
-    summaryUrl: `${publicSs.getUrl()}#gid=${summarySheet.getSheetId()}`,
+    summaryUrl: makePublicSheetUrl_(publicBaseUrl, summarySheet.getSheetId()),
     raceUrls: raceUrls,
-    pickUrls: pickUrls
+    pickUrls: pickUrls,
+    sharingStatus: sharingStatus
   };
   const props = PropertiesService.getScriptProperties();
   props.setProperty(PUBLIC_RESULTS_LINKS_PROPERTY, JSON.stringify(links));
@@ -111,17 +143,40 @@ function getOrCreatePublicResultsSpreadsheet_(settings) {
   props.setProperty(PUBLIC_RESULTS_ID_PROPERTY, ss.getId());
   ss.setSpreadsheetTimeZone(settings.timeZone);
   ss.getSheets()[0].setName("Summary");
-
-  try {
-    DriveApp.getFileById(ss.getId()).setSharing(
-      DriveApp.Access.ANYONE_WITH_LINK,
-      DriveApp.Permission.VIEW
-    );
-  } catch (e) {
-    Logger.log(`Anyone-with-link sharing was not available: ${e.message}`);
-  }
-
   return ss;
+}
+
+function ensurePublicResultsSharing_(publicSs) {
+  const file = DriveApp.getFileById(publicSs.getId());
+  let error = "";
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (e) {
+    error = e.message;
+    Logger.log(`Anyone-with-link sharing was not available: ${error}`);
+  }
+  return {
+    access: String(file.getSharingAccess()),
+    permission: String(file.getSharingPermission()),
+    error: error
+  };
+}
+
+function getPublicResultsBaseUrl_(publicSs) {
+  const file = DriveApp.getFileById(publicSs.getId());
+  let url = publicSs.getUrl();
+  const resourceKey = file.getResourceKey();
+  if (resourceKey && !/[?&]resourcekey=/.test(url)) {
+    const hashIndex = url.indexOf("#");
+    const hash = hashIndex >= 0 ? url.substring(hashIndex) : "";
+    const base = hashIndex >= 0 ? url.substring(0, hashIndex) : url;
+    url = `${base}${base.includes("?") ? "&" : "?"}resourcekey=${encodeURIComponent(resourceKey)}${hash}`;
+  }
+  return url;
+}
+
+function makePublicSheetUrl_(baseUrl, sheetId) {
+  return `${baseUrl.split("#")[0]}#gid=${sheetId}`;
 }
 
 function syncPublicViewers_(publicSs, players) {
@@ -273,7 +328,7 @@ function writePublicSummary_(sheet, settings, model) {
 
   const title = `${settings.seasonYear} Formula 1 Race Pool Summary`;
   sheet.getRange(1, 1, 1, Math.max(totalColumn, 8))
-    .setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold");
+    .setBackground("#ffffff").setFontColor("#202124").setFontWeight("bold");
   sheet.getRange(1, 2).setValue(title).setFontSize(18);
 
   const scoreHeaders = ["Rank", "Player", ...model.races.map(race => race.name), "TOTAL"];
@@ -288,7 +343,7 @@ function writePublicSummary_(sheet, settings, model) {
 
   const positionHeaders = ["Player", ...scoredRaces.map(race => race.name)];
   sheet.getRange(1, positionStartColumn, 1, positionHeaders.length).merge().setValue("Position After Race to Date")
-    .setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold")
+    .setBackground("#ffffff").setFontColor("#202124").setFontWeight("bold")
     .setHorizontalAlignment("center");
   sheet.getRange(3, positionStartColumn, 1, positionHeaders.length).setValues([positionHeaders]);
   const positionRows = model.sortedPlayers.map(name => [
@@ -324,17 +379,17 @@ function writePublicSummary_(sheet, settings, model) {
     sheet.getRange(targetRow, 11).setValue(row[2]);
   });
 
-  sheet.getRange(2, 1, usedRows - 1, usedColumns).setBackground("#161616").setFontColor("#e8e8e8");
-  sheet.getRange(3, 1, 1, scoreHeaders.length).setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold");
-  sheet.getRange(3, positionStartColumn, 1, positionHeaders.length).setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold");
-  sheet.getRange(calloutRow, 1, 1, 5).setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold");
-  sheet.getRange(calloutRow, 7, 1, 5).setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold");
+  sheet.getRange(2, 1, usedRows - 1, usedColumns).setBackground("#ffffff").setFontColor("#202124");
+  sheet.getRange(3, 1, 1, scoreHeaders.length).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
+  sheet.getRange(3, positionStartColumn, 1, positionHeaders.length).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
+  sheet.getRange(calloutRow, 1, 1, 5).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
+  sheet.getRange(calloutRow, 7, 1, 5).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
   sheet.getRange(calloutRow + 1, 2, 5, 3).setWrap(true);
   sheet.getRange(calloutRow + 1, 8, 5, 3).setWrap(true);
   if (scoreRows.length > 0) {
     sheet.getRange(4, 1, scoreRows.length, 1).setHorizontalAlignment("center");
     sheet.getRange(4, 3, scoreRows.length, scoreHeaders.length - 2).setHorizontalAlignment("center");
-    sheet.getRange(4, 1, 1, scoreHeaders.length).setBackground("#d4a017").setFontColor("#0d0d0d").setFontWeight("bold");
+    sheet.getRange(4, 1, 1, scoreHeaders.length).setBackground("#fff2cc").setFontColor("#202124").setFontWeight("bold");
   }
   sheet.setFrozenRows(3);
   // Freeze before column B so no merged callout range crosses the boundary.
@@ -415,14 +470,14 @@ function writePublicRaceSheet_(sheet, result) {
   const columns = result.values[0].length;
   ensurePublicGridSize_(sheet, rows, columns);
   sheet.getRange(1, 1, rows, columns).setValues(result.values);
-  sheet.getRange(1, 1, 1, columns).setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold");
-  sheet.getRange(2, 1, Math.max(rows - 1, 1), columns).setBackground("#161616").setFontColor("#e8e8e8");
+  sheet.getRange(1, 1, 1, columns).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
+  sheet.getRange(2, 1, Math.max(rows - 1, 1), columns).setBackground("#ffffff").setFontColor("#202124");
   if (result.players.length > 0) {
-    sheet.getRange(2, 1, 1, columns).setBackground("#d4a017").setFontColor("#0d0d0d").setFontWeight("bold");
+    sheet.getRange(2, 1, 1, columns).setBackground("#fff2cc").setFontColor("#202124").setFontWeight("bold");
   }
   for (let i = 1; i < result.values.length; i++) {
     if (String(result.values[i][0] || "") === "ACTUAL RESULTS") {
-      sheet.getRange(i + 1, 1, 1, Math.min(columns, 2)).setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold");
+      sheet.getRange(i + 1, 1, 1, Math.min(columns, 2)).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
       break;
     }
   }
@@ -439,12 +494,12 @@ function writePublicPickSheet_(sheet, values) {
   const columns = values[0].length;
   ensurePublicGridSize_(sheet, rows, columns);
   sheet.getRange(1, 1, rows, columns).setValues(values);
-  sheet.getRange(1, 1, 1, columns).setBackground("#0d0d0d").setFontColor("#ffffff").setFontWeight("bold");
+  sheet.getRange(1, 1, 1, columns).setBackground("#ffffff").setFontColor("#202124").setFontWeight("bold");
   if (rows > 1) {
-    sheet.getRange(2, 1, 1, columns).setBackground("#1a472a").setFontColor("#ffffff").setFontWeight("bold");
+    sheet.getRange(2, 1, 1, columns).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
   }
   if (rows > 2) {
-    sheet.getRange(3, 1, rows - 2, columns).setBackground("#161616").setFontColor("#e8e8e8");
+    sheet.getRange(3, 1, rows - 2, columns).setBackground("#ffffff").setFontColor("#202124");
   }
   sheet.setFrozenRows(Math.min(2, rows));
   sheet.setFrozenColumns(1);

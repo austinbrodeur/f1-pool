@@ -158,6 +158,8 @@ Access via "F1 Pool" menu in Google Sheets:
 
 9. **Locked-picks email retries:** Successful recipients are stored per round in the `locked_picks_emailed_R{round}` Script Property. Re-locking retries failed recipients without emailing successful recipients again.
 
+10. **Public link access:** Generated links include the Drive resource key when one is required. Use F1 Pool → Utilities → Check Public Results Access to verify link-sharing status and get an incognito-test URL. Workspace policy can still prohibit anyone-with-link sharing; named player viewers are added as a fallback.
+
 ## Color Scheme
 
 Web app and emails use dark F1 theme:
