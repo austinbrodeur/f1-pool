@@ -618,6 +618,7 @@ function emailRaceResults(roundNum) {
   }
 
   const poolName = ss.getName();
+  const resultsSheetUrl = `${ss.getUrl()}#gid=${scoreSheet.getSheetId()}`;
   const raceWinner = playerResults.length > 0 ? playerResults[0] : null;
   let emailsSent = 0;
 
@@ -628,7 +629,7 @@ function emailRaceResults(roundNum) {
       MailApp.sendEmail({
         to: player.email,
         subject: `🏁 F1 Pool Results — R${race.round}: ${race.name}`,
-        htmlBody: buildResultsEmail(player.name, race, poolName, playerResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings)
+        htmlBody: buildResultsEmail(player.name, race, poolName, playerResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl)
       });
       emailsSent++;
     } catch(e) { Logger.log(`Failed to email results to ${player.name}: ${e.message}`); }
@@ -637,7 +638,7 @@ function emailRaceResults(roundNum) {
   ui.alert(`Results emailed to ${emailsSent} / ${playersWithEmail.length} players.`);
 }
 
-function buildResultsEmail(playerName, race, poolName, allResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings) {
+function buildResultsEmail(playerName, race, poolName, allResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl) {
   const top10Rows = allResults.slice(0, 10).map((p, i) => {
     const isMe = p.name.replace(/ \*$/, "") === playerName;
     const bg = i === 0 ? "rgba(0, 212, 170, 0.15)" : (isMe ? "rgba(212, 160, 23, 0.15)" : (i % 2 === 0 ? "#1c1c1c" : "#161616"));
@@ -681,6 +682,10 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
             <p style="margin:0 0 20px;font-size:15px;line-height:1.6;">The scores are in for the <strong>${race.name}</strong>!</p>
             ${raceWinner ? `<div style="background:rgba(0, 212, 170, 0.15);border-left:4px solid #00d4aa;border-radius:6px;padding:16px;margin:20px 0;text-align:center;"><strong style="font-size:17px;color:#00d4aa;">🏆 Race Winner: ${raceWinner.name} — ${raceWinner.total} pts ($25)</strong></div>` : ""}
             ${mySection}
+            <div style="margin:24px 0;text-align:center;">
+              <a href="${resultsSheetUrl}" style="display:inline-block;background:#00d4aa;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">View All Picks &amp; Full Results</a>
+              <p style="margin:10px 0 0;color:#777;font-size:12px;line-height:1.5;">Open the race results sheet to see everyone&rsquo;s picks and scoring breakdown.</p>
+            </div>
             <h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Race Scoreboard (Top 10)</h3>
             <table style="width:100%;border-collapse:collapse;font-size:13px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;overflow:hidden;">
               <tr style="background:#1a472a;color:white;"><th style="padding:8px 12px;text-align:left;width:40px;">#</th><th style="padding:8px 12px;text-align:left;">Player</th><th style="padding:8px 12px;text-align:right;">Points</th></tr>
