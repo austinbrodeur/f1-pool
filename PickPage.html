@@ -37,14 +37,9 @@
   .lbl { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 2.5px; color: var(--dim); margin: 20px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
   .lbl .hint { font-family: 'Barlow', sans-serif; font-weight: 400; font-size: 11px; letter-spacing: 0; text-transform: none; color: var(--muted); }
 
-  /* Team colors */
-  .t-redbull { --tc: #3671C6; } .t-mclaren { --tc: #FF8000; } .t-mercedes { --tc: #27F4D2; }
-  .t-ferrari { --tc: #E8002D; } .t-williams { --tc: #64C4FF; } .t-racingbulls { --tc: #6692FF; }
-  .t-astonmartin { --tc: #229971; } .t-haas { --tc: #B6BABD; } .t-audi { --tc: #FF4C4C; }
-  .t-alpine { --tc: #FF87BC; } .t-cadillac { --tc: #FFD700; }
-
   /* Driver chip (in pool) */
   .chip {
+    --tc: #888888;
     display: flex; align-items: center; justify-content: center; gap: 6px;
     background: var(--card); border: 1px solid var(--border); border-radius: 6px;
     padding: 10px 8px; cursor: grab; user-select: none;
@@ -174,7 +169,7 @@
 
 <div id="app" style="display:none;">
   <div class="hdr">
-    <h1>🏎️ F1 Pool 2026</h1>
+    <h1 id="poolTitle">F1 Pool</h1>
     <div class="sub" id="rInfo"></div>
     <div class="tag" id="pTag"></div>
   </div>
@@ -217,16 +212,13 @@ let ghostEl = null;
 let dragCode = null;
 let dragSource = null; // 'pool' | 'pole' | 'p3' etc
 
-const TEAM_ORDER = ["Red Bull","McLaren","Mercedes","Ferrari","Williams","Racing Bulls","Aston Martin","Haas","Audi","Alpine","Cadillac"];
-const TEAM_CSS = {"Red Bull":"t-redbull","McLaren":"t-mclaren","Mercedes":"t-mercedes","Ferrari":"t-ferrari","Williams":"t-williams","Racing Bulls":"t-racingbulls","Aston Martin":"t-astonmartin","Haas":"t-haas","Audi":"t-audi","Alpine":"t-alpine","Cadillac":"t-cadillac"};
-const TEAM_CLR = {"Red Bull":"#3671C6","McLaren":"#FF8000","Mercedes":"#27F4D2","Ferrari":"#E8002D","Williams":"#64C4FF","Racing Bulls":"#6692FF","Aston Martin":"#229971","Haas":"#B6BABD","Audi":"#FF4C4C","Alpine":"#FF87BC","Cadillac":"#FFD700"};
-
 google.script.run.withSuccessHandler(init).withFailureHandler(e => showErr(e.message)).getPickPageData(token);
 
 function init(d) {
   document.getElementById('loading').style.display = 'none';
   if (d.error) { showErr(d.error); return; }
   PD = d;
+  document.getElementById('poolTitle').textContent = `${d.poolTitle}`;
   document.getElementById('rInfo').textContent = `Round ${d.roundNum}: ${d.raceName} — ${d.raceDate}`;
   document.getElementById('pTag').textContent = d.playerName;
   document.getElementById('dlTxt').textContent = d.deadlineDisplay;
@@ -249,11 +241,11 @@ function init(d) {
   const byTeam = {};
   d.drivers.forEach(dr => { (byTeam[dr.team] = byTeam[dr.team] || []).push(dr); });
   let poolHTML = '';
-  TEAM_ORDER.forEach(team => {
+  [...new Set(d.drivers.map(dr => dr.team))].forEach(team => {
     if (!byTeam[team]) return;
     poolHTML += `<div class="team-grp"><div class="team-name">${team}</div><div class="pool">`;
     byTeam[team].forEach(dr => {
-      poolHTML += `<div class="chip ${TEAM_CSS[dr.team]}" id="chip-${dr.code}" draggable="true"
+      poolHTML += `<div class="chip" id="chip-${dr.code}" draggable="true" style="--tc:${dr.color}"
         data-code="${dr.code}" data-name="${dr.name}" data-team="${dr.team}"
         ontouchstart="tStart(event,'${dr.code}','pool')" ontouchmove="tMove(event)" ontouchend="tEnd(event)"
         ondragstart="dStart(event,'${dr.code}','pool')">
@@ -338,7 +330,7 @@ function renderSlot(slotId) {
 
   if (code) {
     const dr = PD.drivers.find(d => d.code === code);
-    const clr = TEAM_CLR[dr.team] || '#888';
+    const clr = dr.color || '#888888';
     el.classList.add('filled');
     emptyEl.style.display = 'none';
     placedEl.style.display = 'flex';

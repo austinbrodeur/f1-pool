@@ -22,22 +22,28 @@ const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxNFKbYMlCdC30xh1Rm
 
 function doGet(e) {
   const token = (e && e.parameter && e.parameter.t) || "";
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let poolTitle = "F1 Pool";
+  try {
+    const settings = getPoolSettings(ss);
+    poolTitle = `${settings.poolName} ${settings.seasonYear}`;
+  } catch (err) {}
 
   // If no token, show a friendly message instead of an error
   if (!token) {
     return HtmlService.createHtmlOutput(
       '<div style="font-family:Arial,sans-serif;max-width:500px;margin:60px auto;text-align:center;">' +
-      '<h2 style="color:#1a472a;">🏎️ F1 Pool 2026</h2>' +
+      `<h2 style="color:#1a472a;">${poolTitle}</h2>` +
       '<p>This page requires a personal pick link.</p>' +
       '<p style="color:#666;">Check your email for your unique link to submit picks.</p>' +
       '</div>'
-    ).setTitle("F1 Pool 2026");
+    ).setTitle(poolTitle);
   }
 
   const template = HtmlService.createTemplateFromFile("PickPage");
   template.token = token;
   return template.evaluate()
-    .setTitle("F1 Pool 2026 — Submit Picks")
+    .setTitle(`${poolTitle} — Submit Picks`)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag("viewport", "width=device-width, initial-scale=1");
 }
@@ -97,10 +103,11 @@ function getPickPageData(token) {
   if (!info) return { error: "Invalid or expired link." };
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const race = RACES_2026.find(r => r.round === info.roundNum);
+  const settings = getPoolSettings(ss);
+  const race = getRaceByRound(ss, info.roundNum);
   if (!race) return { error: "Race not found." };
 
-  const deadline = getDeadline(race);
+  const deadline = getDeadline(race, settings);
   const now = new Date();
   const isPastDeadline = now >= deadline;
 
@@ -117,14 +124,11 @@ function getPickPageData(token) {
     roundNum: info.roundNum,
     raceName: race.name,
     raceDate: race.date,
+    poolTitle: `${settings.poolName} ${settings.seasonYear}`,
     deadline: deadline.toISOString(),
-    deadlineDisplay: Utilities.formatDate(deadline, Session.getScriptTimeZone(), "EEEE, MMM d 'at' h:mm a"),
+    deadlineDisplay: Utilities.formatDate(deadline, settings.timeZone, "EEEE, MMM d 'at' h:mm a"),
     isPastDeadline: isPastDeadline,
-    drivers: DRIVERS_2026.map(code => ({
-      code: code,
-      name: DRIVER_NAMES[code],
-      team: TEAMS_2026[code]
-    })),
+    drivers: getDrivers(ss),
     existingPicks: existingPicks
   };
 }
@@ -133,11 +137,14 @@ function submitPicks(token, picks) {
   const info = decodeToken(token);
   if (!info) return { error: "Invalid or expired link." };
 
-  const race = RACES_2026.find(r => r.round === info.roundNum);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const settings = getPoolSettings(ss);
+  const driverCodes = getDrivers(ss).map(driver => driver.code);
+  const race = getRaceByRound(ss, info.roundNum);
   if (!race) return { error: "Race not found." };
 
   // Check deadline
-  const deadline = getDeadline(race);
+  const deadline = getDeadline(race, settings);
   if (new Date() >= deadline) {
     return { error: "The deadline has passed. Picks can no longer be submitted." };
   }
@@ -156,7 +163,7 @@ function submitPicks(token, picks) {
   // Validate all codes exist
   const allCodes = [picks.pole, ...picks.positions];
   for (const code of allCodes) {
-    if (!DRIVERS_2026.includes(code)) {
+    if (!driverCodes.includes(code)) {
       return { error: `Unknown driver code: ${code}` };
     }
   }
@@ -225,7 +232,8 @@ function createWebPicksPrompt() {
 function createAndEmailWebPicks(roundNum) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
-  const race = RACES_2026.find(r => r.round === roundNum);
+  const settings = getPoolSettings(ss);
+  const race = getRaceByRound(ss, roundNum);
   if (!race) { ui.alert("Invalid round."); return; }
 
   if (WEB_APP_URL === "YOUR_WEB_APP_URL_HERE") {
@@ -238,9 +246,9 @@ function createAndEmailWebPicks(roundNum) {
   const playersWithEmail = players.filter(p => p.email);
   if (playersWithEmail.length === 0) { ui.alert("No players have email addresses!"); return; }
 
-  const deadline = getDeadline(race);
-  const deadlineStr = Utilities.formatDate(deadline, Session.getScriptTimeZone(), "EEEE, MMM d 'at' h:mm a");
-  const poolName = ss.getName();
+  const deadline = getDeadline(race, settings);
+  const deadlineStr = Utilities.formatDate(deadline, settings.timeZone, "EEEE, MMM d 'at' h:mm a");
+  const poolName = `${settings.poolName} ${settings.seasonYear}`;
   const props = PropertiesService.getScriptProperties();
 
   // Create hidden response sheet
@@ -266,7 +274,7 @@ function createAndEmailWebPicks(roundNum) {
 
       MailApp.sendEmail({
         to: player.email,
-        subject: `🏎️ F1 Pool Picks — Round ${race.round}: ${race.name}`,
+        subject: `${poolName} Picks — Round ${race.round}: ${race.name}`,
         htmlBody: buildPickEmail(player.name, race, deadlineStr, pickUrl, poolName)
       });
       emailsSent++;
@@ -279,8 +287,11 @@ function createAndEmailWebPicks(roundNum) {
 
   // Update calendar
   const cs = ss.getSheetByName("Race Calendar");
-  cs.getRange(roundNum + 1, 6).setValue("Yes");
-  cs.getRange(roundNum + 1, 7).setValue("Web App");
+  const calendarRow = getCalendarRow(ss, roundNum);
+  if (calendarRow > 0) {
+    cs.getRange(calendarRow, 6).setValue("Yes");
+    cs.getRange(calendarRow, 7).setValue("Web App");
+  }
 
   ui.alert(
     `Web Picks Created & Emailed!`,

@@ -1,5 +1,5 @@
 // =============================================================================
-// 2026 FORMULA 1 POOL — Google Sheets Backend
+// FORMULA 1 POOL — Google Sheets Backend
 // =============================================================================
 // Pick submission is handled by the Web App (WebApp.gs + PickPage.html).
 // This script manages: setup, lock/import, scoring, results emails, leaderboard.
@@ -13,60 +13,6 @@
 // =============================================================================
 
 // ── CONFIG ──────────────────────────────────────────────────────────────────
-
-const DRIVERS_2026 = [
-  "VER", "HAD", "NOR", "PIA",
-  "RUS", "ANT", "LEC", "HAM",
-  "SAI", "ALB", "LAW", "LIN",
-  "ALO", "STR", "OCO", "BEA",
-  "HUL", "BOR", "GAS", "COL",
-  "PER", "BOT"
-];
-
-const DRIVER_NAMES = {
-  "VER": "Verstappen",  "HAD": "Hadjar",     "NOR": "Norris",     "PIA": "Piastri",
-  "RUS": "Russell",     "ANT": "Antonelli",  "LEC": "Leclerc",    "HAM": "Hamilton",
-  "SAI": "Sainz",       "ALB": "Albon",      "LAW": "Lawson",     "LIN": "Lindblad",
-  "ALO": "Alonso",      "STR": "Stroll",     "OCO": "Ocon",       "BEA": "Bearman",
-  "HUL": "Hulkenberg",  "BOR": "Bortoleto",  "GAS": "Gasly",      "COL": "Colapinto",
-  "PER": "Perez",       "BOT": "Bottas"
-};
-
-const TEAMS_2026 = {
-  "VER": "Red Bull",    "HAD": "Red Bull",   "NOR": "McLaren",    "PIA": "McLaren",
-  "RUS": "Mercedes",    "ANT": "Mercedes",   "LEC": "Ferrari",    "HAM": "Ferrari",
-  "SAI": "Williams",    "ALB": "Williams",   "LAW": "Racing Bulls","LIN": "Racing Bulls",
-  "ALO": "Aston Martin","STR": "Aston Martin","OCO": "Haas",      "BEA": "Haas",
-  "HUL": "Audi",        "BOR": "Audi",       "GAS": "Alpine",     "COL": "Alpine",
-  "PER": "Cadillac",    "BOT": "Cadillac"
-};
-
-const RACES_2026 = [
-  { round: 1,  name: "Australian GP",          date: "2026-03-08", day: "Sun" },
-  { round: 2,  name: "Chinese GP",             date: "2026-03-15", day: "Sun" },
-  { round: 3,  name: "Japanese GP",            date: "2026-03-29", day: "Sun" },
-  { round: 4,  name: "Bahrain GP",             date: "2026-04-12", day: "Sun" },
-  { round: 5,  name: "Saudi Arabian GP",       date: "2026-04-19", day: "Sun" },
-  { round: 6,  name: "Miami GP",               date: "2026-05-03", day: "Sun" },
-  { round: 7,  name: "Canadian GP",            date: "2026-05-24", day: "Sun" },
-  { round: 8,  name: "Monaco GP",              date: "2026-06-07", day: "Sun" },
-  { round: 9,  name: "Barcelona-Catalunya GP",  date: "2026-06-21", day: "Sun" },
-  { round: 10, name: "Austrian GP",            date: "2026-07-05", day: "Sun" },
-  { round: 11, name: "British GP",             date: "2026-07-19", day: "Sun" },
-  { round: 12, name: "Belgian GP",             date: "2026-07-19", day: "Sun" },
-  { round: 13, name: "Hungarian GP",           date: "2026-07-26", day: "Sun" },
-  { round: 14, name: "Dutch GP",               date: "2026-08-23", day: "Sun" },
-  { round: 15, name: "Italian GP",             date: "2026-09-06", day: "Sun" },
-  { round: 16, name: "Spanish GP",             date: "2026-09-13", day: "Sun" },
-  { round: 17, name: "Azerbaijan GP",          date: "2026-09-26", day: "Sat" },
-  { round: 18, name: "Singapore GP",           date: "2026-10-11", day: "Sun" },
-  { round: 19, name: "United States GP",       date: "2026-10-25", day: "Sun" },
-  { round: 20, name: "Mexico City GP",         date: "2026-11-01", day: "Sun" },
-  { round: 21, name: "Brazilian GP",           date: "2026-11-08", day: "Sun" },
-  { round: 22, name: "Las Vegas GP",           date: "2026-11-22", day: "Sat" },
-  { round: 23, name: "Qatar GP",               date: "2026-11-30", day: "Sun" },
-  { round: 24, name: "Abu Dhabi GP",           date: "2026-12-06", day: "Sun" }
-];
 
 const SCORING = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 const POLE_BONUS = 5;
@@ -94,7 +40,10 @@ function onOpen() {
       .addItem("Recalculate Leaderboard", "recalculateLeaderboard"))
     .addSubMenu(SpreadsheetApp.getUi().createMenu("🔧 Utilities")
       .addItem("View Deadline Status", "viewDeadlineStatus")
-      .addItem("View Submission Status for Race...", "viewSubmissionStatus"))
+      .addItem("View Submission Status for Race...", "viewSubmissionStatus")
+      .addSeparator()
+      .addItem("Create Teams Config Sheet", "createTeamsConfigSheet")
+      .addItem("Create / Refresh Public Results", "rebuildPublicResults"))
     .addToUi();
 }
 
@@ -102,16 +51,39 @@ function onOpen() {
 
 function initialSetup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const config = getInitialSeasonConfig();
+  ss.setSpreadsheetTimeZone(config.timeZone);
+
+  let settingsSheet = ss.getSheetByName("Settings") || ss.insertSheet("Settings");
+  settingsSheet.clear();
+  const settingsRows = [
+    ["Setting", "Value"],
+    ["Season Year", config.seasonYear],
+    ["Pool Name", config.poolName],
+    ["Time Zone", config.timeZone],
+    ["Deadline Days Before", config.deadlineDaysBefore],
+    ["Deadline Hour", config.deadlineHour]
+  ];
+  settingsSheet.getRange(1, 1, settingsRows.length, 2).setValues(settingsRows);
+  settingsSheet.getRange(1, 1, 1, 2)
+    .setFontWeight("bold").setBackground(HEADER_BG).setFontColor(HEADER_FG);
+  settingsSheet.autoResizeColumns(1, 2);
+
+  let teamsSheet = ss.getSheetByName("Teams") || ss.insertSheet("Teams");
+  teamsSheet.clear();
+  teamsSheet.getRange(1, 1, 1, 2).setValues([["Team", "Color"]])
+    .setFontWeight("bold").setBackground(HEADER_BG).setFontColor(HEADER_FG);
+  const teamRows = config.teams.map(team => [team.name, team.color]);
+  teamsSheet.getRange(2, 1, teamRows.length, 2).setValues(teamRows);
+  teamsSheet.getRange(2, 2, teamRows.length, 1).setBackgrounds(teamRows.map(row => [row[1]]));
+  teamsSheet.autoResizeColumns(1, 2);
 
   let ds = ss.getSheetByName("Drivers") || ss.insertSheet("Drivers");
   ds.clear();
   ds.getRange(1, 1, 1, 3).setValues([["Code", "Driver", "Team"]])
     .setFontWeight("bold").setBackground(HEADER_BG).setFontColor(HEADER_FG);
-  DRIVERS_2026.forEach((code, i) => {
-    ds.getRange(i + 2, 1).setValue(code);
-    ds.getRange(i + 2, 2).setValue(DRIVER_NAMES[code]);
-    ds.getRange(i + 2, 3).setValue(TEAMS_2026[code]);
-  });
+  const driverRows = config.drivers.map(driver => [driver.code, driver.name, driver.team]);
+  ds.getRange(2, 1, driverRows.length, 3).setValues(driverRows);
   ds.autoResizeColumns(1, 3);
 
   let cs = ss.getSheetByName("Race Calendar") || ss.insertSheet("Race Calendar");
@@ -120,20 +92,12 @@ function initialSetup() {
                  "Picks Sent?", "Pick Link", "Locked?", "Scored?", "Race Winner (Pool)"];
   cs.getRange(1, 1, 1, calH.length).setValues([calH])
     .setFontWeight("bold").setBackground(HEADER_BG).setFontColor(HEADER_FG);
-  RACES_2026.forEach((r, i) => {
-    const row = i + 2;
-    const deadline = getDeadline(r);
-    cs.getRange(row, 1).setValue(r.round);
-    cs.getRange(row, 2).setValue(r.name);
-    cs.getRange(row, 3).setValue(r.date);
-    cs.getRange(row, 4).setValue(r.day);
-    cs.getRange(row, 5).setValue(deadline).setNumberFormat("MMM d, yyyy h:mm AM/PM");
-    cs.getRange(row, 6).setValue("No");
-    cs.getRange(row, 7).setValue("");
-    cs.getRange(row, 8).setValue("No");
-    cs.getRange(row, 9).setValue("No");
-    cs.getRange(row, 10).setValue("");
-  });
+  const calendarRows = config.races.map(race => [
+    race.round, race.name, race.date, race.day, getDeadline(race, config),
+    "No", "", "No", "No", ""
+  ]);
+  cs.getRange(2, 1, calendarRows.length, calH.length).setValues(calendarRows);
+  cs.getRange(2, 5, calendarRows.length, 1).setNumberFormat("MMM d, yyyy h:mm AM/PM");
   cs.autoResizeColumns(1, calH.length);
 
   let ps = ss.getSheetByName("Players") || ss.insertSheet("Players");
@@ -150,6 +114,8 @@ function initialSetup() {
 
   const s1 = ss.getSheetByName("Sheet1");
   if (s1 && ss.getSheets().length > 1) try { ss.deleteSheet(s1); } catch(e) {}
+
+  try { syncPublicResults_(ss); } catch (e) { Logger.log(`Public results setup skipped: ${e.message}`); }
 
   SpreadsheetApp.getUi().alert(
     "Setup Complete!",
@@ -184,7 +150,8 @@ function resendWebLinkToPlayer() {
 function sendWebLinksToPlayers(roundNum, specificEmail) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
-  const race = RACES_2026.find(r => r.round === roundNum);
+  const settings = getPoolSettings(ss);
+  const race = getRaceByRound(ss, roundNum);
   if (!race) { ui.alert("Invalid round."); return; }
 
   const props = PropertiesService.getScriptProperties();
@@ -192,9 +159,9 @@ function sendWebLinksToPlayers(roundNum, specificEmail) {
   if (!linksJson) { ui.alert(`No pick links found for Round ${roundNum}. Create them first.`); return; }
 
   const playerLinks = JSON.parse(linksJson);
-  const deadline = getDeadline(race);
-  const deadlineStr = Utilities.formatDate(deadline, Session.getScriptTimeZone(), "EEEE, MMM d 'at' h:mm a");
-  const poolName = ss.getName();
+  const deadline = getDeadline(race, settings);
+  const deadlineStr = Utilities.formatDate(deadline, settings.timeZone, "EEEE, MMM d 'at' h:mm a");
+  const poolName = `${settings.poolName} ${settings.seasonYear}`;
   const players = getPlayers(ss);
   let sent = 0;
 
@@ -206,7 +173,7 @@ function sendWebLinksToPlayers(roundNum, specificEmail) {
     try {
       MailApp.sendEmail({
         to: player.email,
-        subject: `🏎️ F1 Pool Picks — Round ${race.round}: ${race.name}` +
+        subject: `${poolName} Picks — Round ${race.round}: ${race.name}` +
                  (specificEmail ? "" : " (Reminder)"),
         htmlBody: buildPickEmail(player.name, race, deadlineStr, playerUrl, poolName)
       });
@@ -228,7 +195,7 @@ function buildPickEmail(playerName, race, deadlineStr, formUrl, poolName) {
       <div style="background-color: #0d0d0d; margin: 0; padding: 20px; font-family: 'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
         <div style="max-width: 600px; margin: 0 auto; background: #161616; border-radius: 8px; overflow: hidden;">
           <div style="background: linear-gradient(135deg, #1a472a 0%, #0a1f12 100%); color: white; padding: 28px 20px; text-align: center; border-bottom: 3px solid #00d4aa;">
-            <h1 style="margin: 0; font-size: 28px; font-weight: 800; text-transform: uppercase; letter-spacing: 3px;">🏎️ ${poolName}</h1>
+            <h1 style="margin: 0; font-size: 28px; font-weight: 800; text-transform: uppercase; letter-spacing: 3px;">${poolName}</h1>
             <p style="margin: 10px 0 0; font-size: 16px; opacity: 0.85; letter-spacing: 0.5px;">Round ${race.round}: ${race.name}</p>
           </div>
           <div style="background: #161616; padding: 32px 24px; color: #e8e8e8;">
@@ -245,7 +212,7 @@ function buildPickEmail(playerName, race, deadlineStr, formUrl, poolName) {
             <p style="color: #777; font-size: 12px; text-align: center; margin: 0;">If the button doesn't work, copy this link:<br><a href="${formUrl}" style="color: #00d4aa; word-break: break-all;">${formUrl}</a></p>
           </div>
           <div style="background: #0a0a0a; color: #777; padding: 16px; text-align: center; font-size: 12px;">
-            2026 F1 Pool — Good luck! 🍀
+            ${poolName} — Good luck!
           </div>
         </div>
       </div>
@@ -280,7 +247,10 @@ function lockPicksPrompt() {
 function lockAndImportPicks(roundNum) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
-  const race = RACES_2026.find(r => r.round === roundNum);
+  const settings = getPoolSettings(ss);
+  const drivers = getDrivers(ss);
+  const driverCodes = drivers.map(driver => driver.code);
+  const race = getRaceByRound(ss, roundNum);
   if (!race) { ui.alert("Invalid round."); return; }
 
   // Find the hidden responses sheet
@@ -305,10 +275,10 @@ function lockAndImportPicks(roundNum) {
       const name = (row[1] || "").toString().trim();
       if (!name) continue;
 
-      const pole = extractCode(row[2]);
+      const pole = extractCode(row[2], driverCodes);
       const picks = [];
       for (let c = 3; c <= 12; c++) {
-        picks.push(extractCode(row[c]));
+        picks.push(extractCode(row[c], driverCodes));
       }
 
       if (!latestPicks[name] || new Date(timestamp) > new Date(latestPicks[name].timestamp)) {
@@ -323,8 +293,8 @@ function lockAndImportPicks(roundNum) {
   if (pickSheet) pickSheet.clear();
   else pickSheet = ss.insertSheet(sheetName);
 
-  const deadline = getDeadline(race);
-  const deadlineStr = Utilities.formatDate(deadline, Session.getScriptTimeZone(), "EEEE, MMM d 'at' h:mm a");
+  const deadline = getDeadline(race, settings);
+  const deadlineStr = Utilities.formatDate(deadline, settings.timeZone, "EEEE, MMM d 'at' h:mm a");
   pickSheet.getRange(1, 1, 1, 14).merge()
     .setValue(`🔒 LOCKED — Round ${race.round}: ${race.name}  |  Deadline: ${deadlineStr}`)
     .setFontWeight("bold").setFontSize(12)
@@ -348,7 +318,7 @@ function lockAndImportPicks(roundNum) {
       const data = latestPicks[name];
       pole = data.pole;
       picks = data.picks;
-      submitted = Utilities.formatDate(new Date(data.timestamp), Session.getScriptTimeZone(), "MMM d, h:mm a");
+      submitted = Utilities.formatDate(new Date(data.timestamp), settings.timeZone, "MMM d, h:mm a");
 
       const filled = picks.filter(d => d);
       const unique = [...new Set(filled)];
@@ -391,7 +361,21 @@ function lockAndImportPicks(roundNum) {
 
   // Update calendar
   const cs = ss.getSheetByName("Race Calendar");
-  cs.getRange(roundNum + 1, 8).setValue("Yes");
+  const calendarRow = getCalendarRow(ss, roundNum);
+  if (calendarRow > 0) cs.getRange(calendarRow, 8).setValue("Yes");
+
+  let transparencyMessage = "";
+  try {
+    SpreadsheetApp.flush();
+    const publicLinks = syncPublicResults_(ss);
+    const delivery = sendLockedPicksEmails_(ss, race, publicLinks.pickUrls[roundNum], publicLinks.summaryUrl);
+    transparencyMessage = `\n📧 Locked-picks emails sent: ${delivery.sent}` +
+      (delivery.alreadySent > 0 ? ` (${delivery.alreadySent} already notified)` : "") +
+      ` / ${delivery.total}`;
+  } catch (e) {
+    Logger.log(`Locked-picks transparency email failed: ${e.message}`);
+    transparencyMessage = `\n⚠️ Locked-picks email was not sent: ${e.message}`;
+  }
 
   ss.setActiveSheet(pickSheet);
 
@@ -400,9 +384,71 @@ function lockAndImportPicks(roundNum) {
     `✅ Valid picks: ${validCount}\n📋 Carried over: ${carriedCount}\n` +
     `⚠️ Invalid: ${dupeCount}\n❌ No picks: ${missingCount}\n\n` +
     `Total players: ${allPlayers.length}\n\n` +
-    `All picks are now visible in the "${sheetName}" sheet.`,
+    `All picks are now visible in the "${sheetName}" sheet.` + transparencyMessage,
     ui.ButtonSet.OK
   );
+}
+
+function sendLockedPicksEmails_(ss, race, pickUrl, summaryUrl) {
+  if (!pickUrl) throw new Error("The public locked-picks sheet could not be created.");
+  const settings = getPoolSettings(ss);
+  const poolName = `${settings.poolName} ${settings.seasonYear}`;
+  const players = getPlayers(ss).filter(player => player.email);
+  const props = PropertiesService.getScriptProperties();
+  const propertyKey = `locked_picks_emailed_R${race.round}`;
+  let notified = [];
+  try { notified = JSON.parse(props.getProperty(propertyKey) || "[]"); } catch (e) {}
+  const notifiedEmails = new Set(notified.map(email => String(email).toLowerCase()));
+  let sent = 0;
+  let alreadySent = 0;
+
+  players.forEach(player => {
+    const normalizedEmail = player.email.toLowerCase();
+    if (notifiedEmails.has(normalizedEmail)) {
+      alreadySent++;
+      return;
+    }
+    try {
+      MailApp.sendEmail({
+        to: player.email,
+        subject: `🔒 ${poolName} Picks Locked — R${race.round}: ${race.name}`,
+        htmlBody: buildLockedPicksEmail_(player.name, race, poolName, pickUrl, summaryUrl)
+      });
+      sent++;
+      notifiedEmails.add(normalizedEmail);
+    } catch (e) {
+      Logger.log(`Failed to email locked picks to ${player.name}: ${e.message}`);
+    }
+  });
+
+  props.setProperty(propertyKey, JSON.stringify(Array.from(notifiedEmails)));
+  return { sent: sent, alreadySent: alreadySent, total: players.length };
+}
+
+function buildLockedPicksEmail_(playerName, race, poolName, pickUrl, summaryUrl) {
+  return `<html>
+    <head>
+      <meta name="color-scheme" content="light dark">
+      <meta name="supported-color-schemes" content="light dark">
+    </head>
+    <body style="background-color:#0d0d0d !important;margin:0;padding:0;">
+      <div style="background-color:#0d0d0d;margin:0;padding:20px;font-family:'Barlow',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+        <div style="max-width:600px;margin:0 auto;background:#161616;border-radius:8px;overflow:hidden;">
+          <div style="background:linear-gradient(135deg,#1a472a 0%,#0a1f12 100%);color:white;padding:28px 20px;text-align:center;border-bottom:3px solid #00d4aa;">
+            <h1 style="margin:0;font-size:26px;font-weight:800;text-transform:uppercase;letter-spacing:2px;">🔒 Picks Locked</h1>
+            <p style="margin:10px 0 0;font-size:16px;opacity:0.85;">Round ${race.round}: ${race.name}</p>
+          </div>
+          <div style="padding:30px 24px;color:#e8e8e8;text-align:center;">
+            <p style="margin:0 0 14px;text-align:left;">Hey <strong style="color:#00d4aa;">${playerName}</strong>,</p>
+            <p style="margin:0 0 24px;text-align:left;line-height:1.6;">Picks are now locked and visible to the pool. You can review everyone&rsquo;s selections before the race begins.</p>
+            <a href="${pickUrl}" style="display:inline-block;background:#00d4aa;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">View Everyone&rsquo;s Picks</a>
+            ${summaryUrl ? `<br><a href="${summaryUrl}" style="display:inline-block;margin-top:12px;background:#d4a017;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">Open Season Master</a>` : ""}
+          </div>
+          <div style="background:#0a0a0a;color:#777;padding:16px;text-align:center;font-size:12px;">${poolName}</div>
+        </div>
+      </div>
+    </body>
+  </html>`;
 }
 
 function getCarryOverPicks(ss, currentRound, playerName) {
@@ -430,11 +476,12 @@ function getCarryOverPicks(ss, currentRound, playerName) {
 // ── SCORING ─────────────────────────────────────────────────────────────────
 
 function scoreRacePrompt() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
   const r = ui.prompt("Score a Race", "Enter round number:", ui.ButtonSet.OK_CANCEL);
   if (r.getSelectedButton() !== ui.Button.OK) return;
   const round = parseInt(r.getResponseText());
-  const race = RACES_2026.find(rc => rc.round === round);
+  const race = getRaceByRound(ss, round);
   if (!race) { ui.alert("Invalid round number, or this race has been removed from the calendar."); return; }
   scoreRace(round);
 }
@@ -442,7 +489,8 @@ function scoreRacePrompt() {
 function scoreRace(roundNum) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
-  const race = RACES_2026.find(r => r.round === roundNum);
+  const driverCodes = getDrivers(ss).map(driver => driver.code);
+  const race = getRaceByRound(ss, roundNum);
   if (!race) { ui.alert("Race not found."); return; }
 
   // Rescore warning
@@ -467,7 +515,7 @@ function scoreRace(roundNum) {
   const actualResults = resultPrompt.getResponseText().split(",").map(s => s.trim().toUpperCase()).filter(s => s);
   if (actualResults.length < 10) { ui.alert("Enter at least 10 finishers."); return; }
 
-  const unknown = actualResults.filter(d => !DRIVERS_2026.includes(d));
+  const unknown = actualResults.filter(d => !driverCodes.includes(d));
   if (unknown.length > 0) {
     if (ui.alert("Unknown Codes", `Not in grid: ${unknown.join(", ")}\nContinue?`, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
   }
@@ -547,8 +595,11 @@ function scoreRace(roundNum) {
   scoreSheet.autoResizeColumns(1, sHeaders.length);
 
   const cs = ss.getSheetByName("Race Calendar");
-  cs.getRange(roundNum + 1, 9).setValue("Yes");
-  if (scores.length > 0) cs.getRange(roundNum + 1, 10).setValue(scores[0].player + " (" + scores[0].total + " pts)");
+  const calendarRow = getCalendarRow(ss, roundNum);
+  if (calendarRow > 0) {
+    cs.getRange(calendarRow, 9).setValue("Yes");
+    if (scores.length > 0) cs.getRange(calendarRow, 10).setValue(scores[0].player + " (" + scores[0].total + " pts)");
+  }
 
   recalculateLeaderboard();
   ss.setActiveSheet(scoreSheet);
@@ -578,7 +629,11 @@ function emailRaceResultsPrompt() {
 function emailRaceResults(roundNum) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
-  const race = RACES_2026.find(r => r.round === roundNum);
+  const settings = getPoolSettings(ss);
+  const drivers = getDrivers(ss);
+  const driverNames = {};
+  drivers.forEach(driver => { driverNames[driver.code] = driver.name; });
+  const race = getRaceByRound(ss, roundNum);
   if (!race) { ui.alert("Invalid round."); return; }
 
   const scoreSheet = ss.getSheetByName(`R${roundNum} Scores`);
@@ -617,8 +672,16 @@ function emailRaceResults(roundNum) {
     if (name) standings.push({ rank: lbData[i][0], name, total: lbData[i][2] });
   }
 
-  const poolName = ss.getName();
-  const resultsSheetUrl = `${ss.getUrl()}#gid=${scoreSheet.getSheetId()}`;
+  const poolName = `${settings.poolName} ${settings.seasonYear}`;
+  let resultsSheetUrl = `${ss.getUrl()}#gid=${scoreSheet.getSheetId()}`;
+  let masterResultsUrl = "";
+  try {
+    const publicLinks = getFreshPublicResultsLinks_(ss, 120000);
+    resultsSheetUrl = publicLinks.raceUrls[roundNum] || resultsSheetUrl;
+    masterResultsUrl = publicLinks.summaryUrl;
+  } catch (e) {
+    Logger.log(`Public results refresh failed before email: ${e.message}`);
+  }
   const raceWinner = playerResults.length > 0 ? playerResults[0] : null;
   let emailsSent = 0;
 
@@ -628,8 +691,8 @@ function emailRaceResults(roundNum) {
     try {
       MailApp.sendEmail({
         to: player.email,
-        subject: `🏁 F1 Pool Results — R${race.round}: ${race.name}`,
-        htmlBody: buildResultsEmail(player.name, race, poolName, playerResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl)
+        subject: `🏁 ${poolName} Results — R${race.round}: ${race.name}`,
+        htmlBody: buildResultsEmail(player.name, race, poolName, playerResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl, masterResultsUrl, driverNames)
       });
       emailsSent++;
     } catch(e) { Logger.log(`Failed to email results to ${player.name}: ${e.message}`); }
@@ -638,7 +701,7 @@ function emailRaceResults(roundNum) {
   ui.alert(`Results emailed to ${emailsSent} / ${playersWithEmail.length} players.`);
 }
 
-function buildResultsEmail(playerName, race, poolName, allResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl) {
+function buildResultsEmail(playerName, race, poolName, allResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl, masterResultsUrl, driverNames) {
   const top10Rows = allResults.slice(0, 10).map((p, i) => {
     const isMe = p.name.replace(/ \*$/, "") === playerName;
     const bg = i === 0 ? "rgba(0, 212, 170, 0.15)" : (isMe ? "rgba(212, 160, 23, 0.15)" : (i % 2 === 0 ? "#1c1c1c" : "#161616"));
@@ -651,7 +714,7 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
     ? `<div style="background:rgba(212, 160, 23, 0.15);border-left:4px solid #d4a017;border-radius:6px;padding:16px;margin:20px 0;"><strong style="color:#d4a017;font-size:16px;">Your Score: ${myResult.total} pts</strong> <span style="color:#b8b8b8;">— Ranked <strong style="color:#e8e8e8;">#${myResult.rank}</strong> of ${allResults.length}</span></div>`
     : `<div style="background:rgba(225, 6, 0, 0.15);border-left:4px solid #e10600;border-radius:6px;padding:16px;margin:20px 0;color:#e8e8e8;">You did not have scored picks for this race.</div>`;
 
-  const resultsList = actualFinishers.slice(0, 10).map(f => `${f.pos}: <strong style="color:#e8e8e8;">${f.driver}</strong> <span style="color:#777;">${DRIVER_NAMES[f.driver] || f.driver}</span>`).join(" &nbsp;|&nbsp; ");
+  const resultsList = actualFinishers.slice(0, 10).map(f => `${f.pos}: <strong style="color:#e8e8e8;">${f.driver}</strong> <span style="color:#777;">${driverNames[f.driver] || f.driver}</span>`).join(" &nbsp;|&nbsp; ");
 
   const standingsRows = standings.slice(0, 5).map((s, i) => {
     const isMe = s.name === playerName;
@@ -679,12 +742,13 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
           </div>
           <div style="background:#161616;padding:32px 24px;color:#e8e8e8;">
             <p style="margin:0 0 16px;font-size:15px;">Hey <strong style="color:#00d4aa;">${playerName}</strong>,</p>
-            <p style="margin:0 0 20px;font-size:15px;line-height:1.6;">The scores are in for the <strong>${race.name}</strong>!</p>
+            <p style="margin:0 0 20px;font-size:15px;line-height:1.6;">The scores are in for the <strong>${race.name}</strong></p>
             ${raceWinner ? `<div style="background:rgba(0, 212, 170, 0.15);border-left:4px solid #00d4aa;border-radius:6px;padding:16px;margin:20px 0;text-align:center;"><strong style="font-size:17px;color:#00d4aa;">🏆 Race Winner: ${raceWinner.name} — ${raceWinner.total} pts ($25)</strong></div>` : ""}
             ${mySection}
             <div style="margin:24px 0;text-align:center;">
               <a href="${resultsSheetUrl}" style="display:inline-block;background:#00d4aa;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">View All Picks &amp; Full Results</a>
               <p style="margin:10px 0 0;color:#777;font-size:12px;line-height:1.5;">Open the race results sheet to see everyone&rsquo;s picks and scoring breakdown.</p>
+              ${masterResultsUrl ? `<a href="${masterResultsUrl}" style="display:inline-block;margin-top:12px;background:#d4a017;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">Open Season Master</a>` : ""}
             </div>
             <h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Race Scoreboard (Top 10)</h3>
             <table style="width:100%;border-collapse:collapse;font-size:13px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;overflow:hidden;">
@@ -699,7 +763,7 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
               ${standingsRows}${myStandingRow}
             </table>
           </div>
-          <div style="background:#0a0a0a;color:#777;padding:16px;text-align:center;font-size:12px;">2026 F1 Pool — See you at the next race! 🏎️</div>
+          <div style="background:#0a0a0a;color:#777;padding:16px;text-align:center;font-size:12px;">${poolName} — See you at the next race!</div>
         </div>
       </div>
     </body>
@@ -714,7 +778,7 @@ function recalculateLeaderboard() {
   lb.clear();
 
   const scoredRaces = [];
-  RACES_2026.forEach(race => {
+  getRaces(ss).forEach(race => {
     if (ss.getSheetByName(`R${race.round} Scores`)) scoredRaces.push(race);
   });
 
@@ -776,9 +840,123 @@ function recalculateLeaderboard() {
 
   lb.setFrozenRows(1);
   lb.setFrozenColumns(2);
+
+  SpreadsheetApp.flush();
+  try { syncPublicResults_(ss); } catch (e) { Logger.log(`Public results refresh failed: ${e.message}`); }
 }
 
 // ── UTILITIES ───────────────────────────────────────────────────────────────
+
+function createTeamsConfigSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  if (ss.getSheetByName("Teams")) {
+    ui.alert("Teams Config", "The Teams sheet already exists. Edit its colors directly.", ui.ButtonSet.OK);
+    return;
+  }
+
+  const config = getInitialSeasonConfig();
+  const sheet = ss.insertSheet("Teams");
+  sheet.getRange(1, 1, 1, 2).setValues([["Team", "Color"]])
+    .setFontWeight("bold").setBackground(HEADER_BG).setFontColor(HEADER_FG);
+  const rows = config.teams.map(team => [team.name, team.color]);
+  sheet.getRange(2, 1, rows.length, 2).setValues(rows);
+  sheet.getRange(2, 2, rows.length, 1).setBackgrounds(rows.map(row => [row[1]]));
+  sheet.autoResizeColumns(1, 2);
+  ui.alert("Teams Config", "The Teams sheet was created. Future color edits can be made there.", ui.ButtonSet.OK);
+}
+
+function getPoolSettings(ss) {
+  const sheet = ss.getSheetByName("Settings");
+  if (!sheet || sheet.getLastRow() < 2) {
+    const config = getInitialSeasonConfig();
+    return {
+      seasonYear: config.seasonYear,
+      poolName: config.poolName,
+      timeZone: config.timeZone,
+      deadlineDaysBefore: config.deadlineDaysBefore,
+      deadlineHour: config.deadlineHour
+    };
+  }
+
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  const settings = {};
+  values.forEach(row => { settings[String(row[0]).trim()] = row[1]; });
+
+  const result = {
+    seasonYear: parseInt(settings["Season Year"], 10),
+    poolName: String(settings["Pool Name"] || "F1 Pool").trim(),
+    timeZone: String(settings["Time Zone"] || "America/Vancouver").trim(),
+    deadlineDaysBefore: parseInt(settings["Deadline Days Before"], 10),
+    deadlineHour: parseInt(settings["Deadline Hour"], 10)
+  };
+  if (!Number.isInteger(result.seasonYear) || !Number.isInteger(result.deadlineDaysBefore) || !Number.isInteger(result.deadlineHour)) {
+    throw new Error("Settings contains an invalid season year or deadline value.");
+  }
+  return result;
+}
+
+function normalizeTeamColor_(color) {
+  const value = String(color || "").trim().toUpperCase();
+  return /^#[0-9A-F]{6}$/.test(value) ? value : "#888888";
+}
+
+function getTeams(ss) {
+  const sheet = ss.getSheetByName("Teams");
+  if (!sheet || sheet.getLastRow() < 2) {
+    return getInitialSeasonConfig().teams.map(team => ({
+      name: team.name,
+      color: normalizeTeamColor_(team.color)
+    }));
+  }
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues()
+    .map(row => ({
+      name: String(row[0] || "").trim(),
+      color: normalizeTeamColor_(row[1])
+    }))
+    .filter(team => team.name);
+}
+
+function getDrivers(ss) {
+  const sheet = ss.getSheetByName("Drivers");
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const teamColors = {};
+  getTeams(ss).forEach(team => { teamColors[team.name] = team.color; });
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues()
+    .map(row => ({
+      code: String(row[0] || "").trim().toUpperCase(),
+      name: String(row[1] || "").trim(),
+      team: String(row[2] || "").trim(),
+      color: teamColors[String(row[2] || "").trim()] || "#888888"
+    }))
+    .filter(driver => driver.code);
+}
+
+function getRaces(ss) {
+  const sheet = ss.getSheetByName("Race Calendar");
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const timeZone = getPoolSettings(ss).timeZone;
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues()
+    .map(row => ({
+      round: parseInt(row[0], 10),
+      name: String(row[1] || "").trim(),
+      date: row[2] instanceof Date ? Utilities.formatDate(row[2], timeZone, "yyyy-MM-dd") : String(row[2] || "").trim().slice(0, 10),
+      day: String(row[3] || "").trim()
+    }))
+    .filter(race => Number.isInteger(race.round) && race.name && race.date);
+}
+
+function getRaceByRound(ss, roundNum) {
+  return getRaces(ss).find(race => race.round === roundNum) || null;
+}
+
+function getCalendarRow(ss, roundNum) {
+  const sheet = ss.getSheetByName("Race Calendar");
+  if (!sheet || sheet.getLastRow() < 2) return -1;
+  const rounds = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  const index = rounds.findIndex(row => parseInt(row[0], 10) === roundNum);
+  return index < 0 ? -1 : index + 2;
+}
 
 function getPlayers(ss) {
   const ps = ss.getSheetByName("Players");
@@ -793,12 +971,12 @@ function getPlayers(ss) {
   return players;
 }
 
-function getDeadline(race) {
-  const raceDate = new Date(race.date + "T00:00:00");
-  const d = new Date(raceDate);
-  d.setDate(d.getDate() - 3);
-  d.setHours(20, 0, 0, 0);
-  return d;
+function getDeadline(race, settings) {
+  const parts = race.date.split("-").map(Number);
+  const deadlineDate = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] - settings.deadlineDaysBefore, 12));
+  const dateString = Utilities.formatDate(deadlineDate, "UTC", "yyyy-MM-dd");
+  const hour = String(settings.deadlineHour).padStart(2, "0");
+  return Utilities.parseDate(`${dateString} ${hour}:00`, settings.timeZone, "yyyy-MM-dd HH:mm");
 }
 
 function findSheet(ss, prefix) {
@@ -808,13 +986,13 @@ function findSheet(ss, prefix) {
   return null;
 }
 
-function extractCode(val) {
+function extractCode(val, driverCodes) {
   const s = (val || "").toString().trim().toUpperCase();
-  if (s.length === 3 && DRIVERS_2026.includes(s)) return s;
+  if (s.length === 3 && driverCodes.includes(s)) return s;
   const match = s.match(/^([A-Z]{3})\s*-/);
-  if (match && DRIVERS_2026.includes(match[1])) return match[1];
+  if (match && driverCodes.includes(match[1])) return match[1];
   const first3 = s.substring(0, 3);
-  if (DRIVERS_2026.includes(first3)) return first3;
+  if (driverCodes.includes(first3)) return first3;
   return s;
 }
 
@@ -848,7 +1026,7 @@ function viewSubmissionStatus() {
   const r = ui.prompt("Submission Status", "Enter round number:", ui.ButtonSet.OK_CANCEL);
   if (r.getSelectedButton() !== ui.Button.OK) return;
   const round = parseInt(r.getResponseText());
-  const race = RACES_2026.find(rc => rc.round === round);
+  const race = getRaceByRound(ss, round);
   if (!race) { ui.alert("Invalid round."); return; }
 
   let respSheet = null;
