@@ -679,6 +679,7 @@ function emailRaceResults(roundNum) {
       if (pos && driver) actualFinishers.push({ pos, driver });
     }
   }
+  const scoreBreakdownsByPlayer = buildPlayerScoreBreakdowns_(scoreData, actualResultsStart, actualFinishers, actualPole);
 
   const lb = ss.getSheetByName("Leaderboard");
   const lbData = lb ? lb.getDataRange().getValues() : [];
@@ -704,11 +705,12 @@ function emailRaceResults(roundNum) {
   playersWithEmail.forEach(player => {
     const myResult = playerResults.find(p => p.name.replace(/ \*$/, "") === player.name);
     const myStanding = standings.find(s => s.name === player.name);
+    const myBreakdown = scoreBreakdownsByPlayer[player.name] || null;
     try {
       MailApp.sendEmail({
         to: player.email,
         subject: `🏁 ${poolName} Results — R${race.round}: ${race.name}`,
-        htmlBody: buildResultsEmail(player.name, race, poolName, playerResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl, masterResultsUrl, driverNames)
+        htmlBody: buildResultsEmail(player.name, race, poolName, playerResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl, masterResultsUrl, driverNames, myBreakdown)
       });
       emailsSent++;
     } catch(e) { Logger.log(`Failed to email results to ${player.name}: ${e.message}`); }
@@ -717,7 +719,71 @@ function emailRaceResults(roundNum) {
   ui.alert(`Results emailed to ${emailsSent} / ${playersWithEmail.length} players.`);
 }
 
-function buildResultsEmail(playerName, race, poolName, allResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl, masterResultsUrl, driverNames) {
+function buildPlayerScoreBreakdowns_(scoreData, actualResultsStart, actualFinishers, actualPole) {
+  const headers = scoreData[0].map(header => (header || "").toString().trim());
+  const polePickCol = headers.indexOf("Pole Pick");
+  const polePtsCol = headers.indexOf("Pole Pts");
+  const positionPtsCol = headers.indexOf("Position Pts");
+  const rawTotalCol = headers.indexOf("Raw Total");
+  const multiplierCol = headers.indexOf("Mult.");
+  const totalCol = headers.indexOf("TOTAL");
+  const pickCols = [];
+  for (let pos = 1; pos <= 10; pos++) pickCols.push(headers.indexOf(`P${pos}`));
+
+  const actualByDriver = {};
+  actualFinishers.forEach(finisher => {
+    const actualPosition = parseInt(finisher.pos.replace(/\D/g, ""), 10);
+    if (finisher.driver && actualPosition) actualByDriver[finisher.driver] = actualPosition;
+  });
+
+  const breakdowns = {};
+  const lastPlayerRow = actualResultsStart > 0 ? actualResultsStart : scoreData.length;
+  for (let i = 1; i < lastPlayerRow; i++) {
+    const displayName = (scoreData[i][0] || "").toString().trim();
+    if (!displayName) continue;
+    const playerName = displayName.replace(/ \*$/, "");
+    const polePick = polePickCol >= 0 ? (scoreData[i][polePickCol] || "").toString().trim() : "";
+    const picks = pickCols.map((col, index) => {
+      const driver = col >= 0 ? (scoreData[i][col] || "").toString().trim() : "";
+      const predictedPosition = index + 1;
+      const actualPosition = actualByDriver[driver] || null;
+      const points = actualPosition && actualPosition <= TOP_FINISH_CUTOFF
+        ? SCORING[Math.abs(actualPosition - predictedPosition)] || 0
+        : 0;
+      return {
+        predictedPosition: predictedPosition,
+        driver: driver,
+        actualPosition: actualPosition,
+        points: points
+      };
+    });
+    breakdowns[playerName] = {
+      carried: displayName.endsWith(" *"),
+      pole: {
+        pick: polePick,
+        actual: actualPole,
+        points: polePtsCol >= 0 ? parseFloat(scoreData[i][polePtsCol]) || 0 : (polePick === actualPole ? POLE_BONUS : 0)
+      },
+      picks: picks,
+      positionPoints: positionPtsCol >= 0 ? parseFloat(scoreData[i][positionPtsCol]) || 0 : picks.reduce((sum, pick) => sum + pick.points, 0),
+      rawTotal: rawTotalCol >= 0 ? parseFloat(scoreData[i][rawTotalCol]) || 0 : 0,
+      multiplier: multiplierCol >= 0 ? parseFloat(scoreData[i][multiplierCol]) || 1 : 1,
+      total: totalCol >= 0 ? parseFloat(scoreData[i][totalCol]) || 0 : 0
+    };
+  }
+  return breakdowns;
+}
+
+function escapeHtml_(value) {
+  return (value == null ? "" : value.toString())
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildResultsEmail(playerName, race, poolName, allResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl, masterResultsUrl, driverNames, myBreakdown) {
   const top10Rows = allResults.slice(0, 10).map((p, i) => {
     const isMe = p.name.replace(/ \*$/, "") === playerName;
     const bg = i === 0 ? "rgba(0, 212, 170, 0.15)" : (isMe ? "rgba(212, 160, 23, 0.15)" : (i % 2 === 0 ? "#1c1c1c" : "#161616"));
@@ -731,6 +797,28 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
     : `<div style="background:rgba(225, 6, 0, 0.15);border-left:4px solid #e10600;border-radius:6px;padding:16px;margin:20px 0;color:#e8e8e8;">You did not have scored picks for this race.</div>`;
 
   const resultsList = actualFinishers.slice(0, 10).map(f => `${f.pos}: <strong style="color:#e8e8e8;">${f.driver}</strong> <span style="color:#777;">${driverNames[f.driver] || f.driver}</span>`).join(" &nbsp;|&nbsp; ");
+
+  const pickBreakdownRows = myBreakdown ? [
+    `<tr style="background:#161616;border-left:3px solid ${myBreakdown.pole.points > 0 ? "#9b59b6" : "#2a2a2a"};"><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#d4a017;font-weight:bold;">Pole</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#e8e8e8;">${escapeHtml_(myBreakdown.pole.actual || "—")}</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#e8e8e8;"><strong>${escapeHtml_(myBreakdown.pole.pick || "—")}</strong></td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;text-align:right;font-weight:bold;color:${myBreakdown.pole.points > 0 ? "#00d4aa" : "#777"};">${myBreakdown.pole.points}</td></tr>`,
+    ...myBreakdown.picks.map((pick, index) => {
+      const actual = actualFinishers[index] ? actualFinishers[index].driver : "—";
+      const actualPositionLabel = pick.actualPosition ? ` <span style="color:#777;font-size:11px;">(finished P${pick.actualPosition})</span>` : "";
+      const bg = index % 2 === 0 ? "#1c1c1c" : "#161616";
+      return `<tr style="background:${bg};border-left:3px solid ${pick.points > 0 ? "#00d4aa" : "#2a2a2a"};"><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#b8b8b8;">P${pick.predictedPosition}</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#e8e8e8;">${escapeHtml_(actual)}</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#e8e8e8;"><strong>${escapeHtml_(pick.driver || "—")}</strong>${actualPositionLabel}</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;text-align:right;font-weight:bold;color:${pick.points > 0 ? "#00d4aa" : "#777"};">${pick.points}</td></tr>`;
+    })
+  ].join("") : "";
+
+  const pickBreakdownSection = myBreakdown
+    ? `<h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Your Pick Breakdown</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;overflow:hidden;">
+              <tr style="background:#1a472a;color:white;"><th style="padding:7px 10px;text-align:left;width:56px;">Slot</th><th style="padding:7px 10px;text-align:left;">Actual</th><th style="padding:7px 10px;text-align:left;">Your Pick</th><th style="padding:7px 10px;text-align:right;width:52px;">Pts</th></tr>
+              ${pickBreakdownRows}
+              <tr style="background:#0d0d0d;"><td colspan="3" style="padding:8px 10px;color:#b8b8b8;text-align:right;border-top:1px solid #444;">Position points</td><td style="padding:8px 10px;color:#e8e8e8;text-align:right;font-weight:bold;border-top:1px solid #444;">${myBreakdown.positionPoints}</td></tr>
+              <tr style="background:#0d0d0d;"><td colspan="3" style="padding:8px 10px;color:#b8b8b8;text-align:right;">Pole + position raw total</td><td style="padding:8px 10px;color:#e8e8e8;text-align:right;font-weight:bold;">${myBreakdown.rawTotal}</td></tr>
+              ${myBreakdown.multiplier !== 1 ? `<tr style="background:#0d0d0d;"><td colspan="3" style="padding:8px 10px;color:#b8b8b8;text-align:right;">Partial-race multiplier</td><td style="padding:8px 10px;color:#e8e8e8;text-align:right;font-weight:bold;">×${myBreakdown.multiplier}</td></tr>` : ""}
+            </table>
+            <p style="margin:8px 0 0;color:#777;font-size:12px;line-height:1.5;">Pick points use the standard scoring curve: exact 25, off by 1 = 18, off by 2 = 15, and so on. Drivers outside the top ${TOP_FINISH_CUTOFF} score 0.</p>`
+    : "";
 
   const standingsRows = standings.slice(0, 5).map((s, i) => {
     const isMe = s.name === playerName;
@@ -772,6 +860,7 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
               ${top10Rows}
               ${allResults.length > 10 ? `<tr><td colspan="3" style="padding:8px 12px;color:#777;font-size:12px;background:#0d0d0d;">...and ${allResults.length - 10} more</td></tr>` : ""}
             </table>
+            ${pickBreakdownSection}
             ${actualFinishers.length > 0 ? `<h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Actual Race Result</h3><p style="font-size:13px;color:#b8b8b8;line-height:1.8;background:#0d0d0d;padding:12px;border-radius:6px;border:1px solid #2a2a2a;">${actualPole ? `<strong style="color:#d4a017;">Pole:</strong> <span style="color:#e8e8e8;">${actualPole}</span> &nbsp;|&nbsp; ` : ""}${resultsList}</p>` : ""}
             <h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Season Standings</h3>
             <table style="width:100%;border-collapse:collapse;font-size:13px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;overflow:hidden;">
