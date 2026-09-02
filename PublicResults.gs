@@ -56,6 +56,8 @@ function checkPublicResultsAccess() {
 function syncPublicResults_(sourceSs) {
   const settings = getPoolSettings(sourceSs);
   const races = getRaces(sourceSs);
+  const driverNames = {};
+  getDrivers(sourceSs).forEach(driver => { driverNames[driver.code] = driver.name; });
   const publicSs = getOrCreatePublicResultsSpreadsheet_(settings);
   const sharingStatus = ensurePublicResultsSharing_(publicSs);
   syncPublicViewers_(publicSs, getPlayers(sourceSs));
@@ -85,7 +87,7 @@ function syncPublicResults_(sourceSs) {
   raceResults.forEach(result => {
     const sheetName = makePublicRaceSheetName_(result.race);
     const targetSheet = ensurePublicSheet_(publicSs, sheetName);
-    writePublicRaceSheet_(targetSheet, result);
+    writePublicRaceSheet_(targetSheet, result, driverNames);
     raceUrls[result.race.round] = makePublicSheetUrl_(publicBaseUrl, targetSheet.getSheetId());
   });
 
@@ -239,9 +241,15 @@ function buildPublicResultsModel_(playerNames, races, raceResults) {
   });
 
   const totals = {};
+  const winnings = {};
   names.forEach(name => { totals[name] = 0; });
+  names.forEach(name => { winnings[name] = 0; });
   raceResults.forEach(result => {
     result.players.forEach(player => { totals[player.name] = (totals[player.name] || 0) + player.score; });
+    const high = Math.max.apply(null, result.players.map(player => player.score));
+    const winners = high > 0 ? result.players.filter(player => player.score === high) : [];
+    const payout = winners.length > 0 ? RACE_WIN_POT / winners.length : 0;
+    winners.forEach(player => { winnings[player.name] = (winnings[player.name] || 0) + payout; });
   });
 
   const sortedPlayers = names.slice().sort((a, b) => (totals[b] - totals[a]) || a.localeCompare(b));
@@ -264,6 +272,7 @@ function buildPublicResultsModel_(playerNames, races, raceResults) {
     resultByRound: resultByRound,
     scoreByRound: scoreByRound,
     totals: totals,
+    winnings: winnings,
     sortedPlayers: sortedPlayers,
     ranksByRound: ranksByRound,
     latestTopScores: latestResult ? groupTopRaceScores_(latestResult.players, 5) : [],
@@ -317,7 +326,7 @@ function ensurePublicGridSize_(sheet, rows, columns) {
 function writePublicSummary_(sheet, settings, model) {
   resetPublicSheet_(sheet);
   const scoredRaces = model.raceResults.map(result => result.race);
-  const totalColumn = model.races.length + 3;
+  const totalColumn = model.races.length + 4;
   const positionStartColumn = totalColumn + 2;
   const tableRows = Math.max(model.sortedPlayers.length, 1);
   const calloutRow = tableRows + 7;
@@ -331,13 +340,14 @@ function writePublicSummary_(sheet, settings, model) {
     .setBackground("#ffffff").setFontColor("#202124").setFontWeight("bold");
   sheet.getRange(1, 2).setValue(title).setFontSize(18);
 
-  const scoreHeaders = ["Rank", "Player", ...model.races.map(race => race.name), "TOTAL"];
+  const scoreHeaders = ["Rank", "Player", ...model.races.map(race => race.name), "TOTAL", "Race Winnings"];
   sheet.getRange(3, 1, 1, scoreHeaders.length).setValues([scoreHeaders]);
   const scoreRows = model.sortedPlayers.map((name, index) => [
     index + 1,
     name,
     ...model.races.map(race => (model.scoreByRound[race.round] || {})[name] || 0),
-    Math.round((model.totals[name] || 0) * 10) / 10
+    Math.round((model.totals[name] || 0) * 10) / 10,
+    Math.round((model.winnings[name] || 0) * 100) / 100
   ]);
   if (scoreRows.length > 0) sheet.getRange(4, 1, scoreRows.length, scoreHeaders.length).setValues(scoreRows);
 
@@ -389,6 +399,7 @@ function writePublicSummary_(sheet, settings, model) {
   if (scoreRows.length > 0) {
     sheet.getRange(4, 1, scoreRows.length, 1).setHorizontalAlignment("center");
     sheet.getRange(4, 3, scoreRows.length, scoreHeaders.length - 2).setHorizontalAlignment("center");
+    sheet.getRange(4, scoreHeaders.length, scoreRows.length, 1).setNumberFormat("$0.00");
     sheet.getRange(4, 1, 1, scoreHeaders.length).setBackground("#fff2cc").setFontColor("#202124").setFontWeight("bold");
   }
   sheet.setFrozenRows(3);
@@ -410,10 +421,11 @@ function writeOurRaceChart_(sheet, model) {
   }
 
   const dataColumn = 27;
-  const header = ["Race", ...model.sortedPlayers];
+  const chartPlayers = model.sortedPlayers;
+  const header = ["Race", ...chartPlayers];
   const rows = model.raceResults.map(result => [
     result.race.name,
-    ...model.sortedPlayers.map(name => model.ranksByRound[result.race.round][name])
+    ...chartPlayers.map(name => model.ranksByRound[result.race.round][name])
   ]);
   ensurePublicGridSize_(sheet, rows.length + 1, dataColumn + header.length - 1);
   sheet.getRange(1, dataColumn, 1, header.length).setValues([header]);
@@ -429,7 +441,7 @@ function writeOurRaceChart_(sheet, model) {
     .setOption("height", 720)
     .setOption("legend", { position: "right", textStyle: { fontSize: 9 } })
     .setOption("pointSize", 3)
-    .setOption("vAxis", { direction: -1, viewWindow: { min: 1, max: model.sortedPlayers.length } })
+    .setOption("vAxis", { viewWindow: { min: 1, max: model.sortedPlayers.length } })
     .setOption("hAxis", { slantedText: true, slantedTextAngle: 35 })
     .build();
   sheet.insertChart(chart);
@@ -443,48 +455,193 @@ function writePointsChart_(sheet, model) {
   }
 
   const dataColumn = 27;
-  const rows = [["Player", "Points"], ...model.sortedPlayers.map(name => [name, model.totals[name] || 0])];
-  ensurePublicGridSize_(sheet, rows.length, dataColumn + 1);
-  sheet.getRange(1, dataColumn, rows.length, 2).setValues(rows);
+  const chartPlayers = model.sortedPlayers;
+  const rows = [["Player", ...chartPlayers]];
+  chartPlayers.forEach((name, index) => {
+    const row = [name];
+    chartPlayers.forEach((_, seriesIndex) => row.push(seriesIndex === index ? model.totals[name] || 0 : null));
+    rows.push(row);
+  });
+  const palette = [
+    "#00d4aa", "#e10600", "#d4a017", "#9b59b6", "#3498db", "#f39c12",
+    "#2ecc71", "#e67e22", "#1abc9c", "#e84393", "#95a5a6", "#c0392b"
+  ];
+  ensurePublicGridSize_(sheet, rows.length, dataColumn + chartPlayers.length);
+  sheet.getRange(1, dataColumn, rows.length, chartPlayers.length + 1).setValues(rows);
 
   const chart = sheet.newChart()
     .setChartType(Charts.ChartType.BAR)
-    .addRange(sheet.getRange(1, dataColumn, rows.length, 2))
+    .addRange(sheet.getRange(1, dataColumn, rows.length, chartPlayers.length + 1))
     .setNumHeaders(1)
     .setPosition(1, 1, 0, 0)
     .setOption("title", "Player Points Standings")
     .setOption("width", 1050)
     .setOption("height", Math.max(650, model.sortedPlayers.length * 24))
     .setOption("legend", { position: "none" })
-    .setOption("colors", ["#00d4aa"])
+    .setOption("colors", chartPlayers.map((_, index) => palette[index % palette.length]))
     .setOption("hAxis", { title: "Points", minValue: 0 })
-    .setOption("vAxis", { direction: -1 })
     .build();
   sheet.insertChart(chart);
 }
 
-function writePublicRaceSheet_(sheet, result) {
-  resetPublicSheet_(sheet);
-  if (result.values.length === 0 || result.values[0].length === 0) return;
-  const rows = result.values.length;
-  const columns = result.values[0].length;
-  ensurePublicGridSize_(sheet, rows, columns);
-  sheet.getRange(1, 1, rows, columns).setValues(result.values);
-  sheet.getRange(1, 1, 1, columns).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
-  sheet.getRange(2, 1, Math.max(rows - 1, 1), columns).setBackground("#ffffff").setFontColor("#202124");
-  if (result.players.length > 0) {
-    sheet.getRange(2, 1, 1, columns).setBackground("#fff2cc").setFontColor("#202124").setFontWeight("bold");
-  }
-  for (let i = 1; i < result.values.length; i++) {
-    if (String(result.values[i][0] || "") === "ACTUAL RESULTS") {
-      sheet.getRange(i + 1, 1, 1, Math.min(columns, 2)).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
+function buildPublicRaceBreakdown_(result) {
+  const values = result.values;
+  const headers = values[0].map(header => String(header || "").trim());
+  const polePickCol = headers.indexOf("Pole Pick");
+  const polePtsCol = headers.indexOf("Pole Pts");
+  const totalCol = headers.indexOf("TOTAL");
+  const pickCols = [];
+  for (let pos = 1; pos <= 10; pos++) pickCols.push(headers.indexOf(`P${pos}`));
+
+  let actualResultsStart = -1;
+  let actualPole = "";
+  for (let i = 1; i < values.length; i++) {
+    const label = String(values[i][0] || "").trim();
+    if (label === "ACTUAL RESULTS") {
+      actualResultsStart = i;
+      actualPole = String(values[i][1] || "").replace("Pole: ", "").trim();
       break;
     }
   }
-  sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(1);
-  sheet.autoResizeColumns(1, columns);
-  sheet.setColumnWidth(1, 180);
+
+  const finishers = [];
+  if (actualResultsStart >= 0) {
+    for (let i = actualResultsStart + 1; i < values.length; i++) {
+      const pos = String(values[i][0] || "").trim();
+      const driver = String(values[i][1] || "").trim();
+      if (pos && driver) finishers.push({ pos: pos, driver: driver });
+    }
+  }
+
+  const actualByDriver = {};
+  finishers.forEach(finisher => {
+    const actualPosition = parseInt(finisher.pos.replace(/\D/g, ""), 10);
+    if (finisher.driver && actualPosition) actualByDriver[finisher.driver] = actualPosition;
+  });
+
+  const lastPlayerRow = actualResultsStart > 0 ? actualResultsStart : values.length;
+  const players = [];
+  for (let i = 1; i < lastPlayerRow; i++) {
+    const displayName = String(values[i][0] || "").trim();
+    if (!displayName) continue;
+    const polePick = polePickCol >= 0 ? String(values[i][polePickCol] || "").trim() : "";
+    const picks = [{
+      slot: "Pole",
+      driver: polePick,
+      points: polePtsCol >= 0 ? parseFloat(values[i][polePtsCol]) || 0 : (polePick === actualPole ? POLE_BONUS : 0)
+    }];
+    pickCols.forEach((col, index) => {
+      const driver = col >= 0 ? String(values[i][col] || "").trim() : "";
+      const actualPosition = actualByDriver[driver];
+      const points = actualPosition && actualPosition <= TOP_FINISH_CUTOFF
+        ? SCORING[Math.abs(actualPosition - (index + 1))] || 0
+        : 0;
+      picks.push({ slot: String(index + 1), driver: driver, points: points });
+    });
+    players.push({
+      displayName: displayName,
+      picks: picks,
+      total: totalCol >= 0 ? parseFloat(values[i][totalCol]) || 0 : 0
+    });
+  }
+
+  return {
+    actualPole: actualPole,
+    finishers: finishers,
+    players: players
+  };
+}
+
+function getDriverLastName_(driverCode, driverNames) {
+  const name = String((driverNames && driverNames[driverCode]) || driverCode || "").trim();
+  if (!name) return "";
+  const suffixes = { "jr": true, "jr.": true, "sr": true, "sr.": true, "ii": true, "iii": true, "iv": true };
+  const parts = name.split(/\s+/).filter(part => !suffixes[part.toLowerCase()]);
+  return parts[parts.length - 1];
+}
+
+function writePublicRaceSheet_(sheet, result, driverNames) {
+  resetPublicSheet_(sheet);
+  if (result.values.length === 0 || result.values[0].length === 0) return;
+  const breakdown = buildPublicRaceBreakdown_(result);
+  const cardsPerRow = 3;
+  const cardRows = 13;
+  const cardCols = 4;
+  const gap = 1;
+  const actualStartRow = 1;
+  const actualHeaderRows = 2;
+  const actualRows = Math.max(15, breakdown.finishers.length) + actualHeaderRows + (breakdown.actualPole ? 1 : 0);
+  const cardsStartRow = actualStartRow + actualRows + 2;
+  const cardRowGroups = Math.ceil(breakdown.players.length / cardsPerRow);
+  const usedRows = Math.max(cardsStartRow + Math.max(cardRowGroups, 1) * (cardRows + gap), actualRows + 1);
+  const usedColumns = cardsPerRow * cardCols + (cardsPerRow - 1) * gap;
+  ensurePublicGridSize_(sheet, usedRows, usedColumns);
+
+  sheet.getRange(1, 1, usedRows, usedColumns).setBackground("#ffffff").setFontColor("#202124");
+  sheet.setHiddenGridlines(false);
+
+  sheet.getRange(1, 1, 1, 4).setValues([[`Round ${result.race.round}`, result.race.name, "Actual Results", ""]])
+    .setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
+  let row = 2;
+  if (breakdown.actualPole) {
+    sheet.getRange(row, 1, 1, 3).setValues([[
+      "Pole",
+      breakdown.actualPole,
+      getDriverLastName_(breakdown.actualPole, driverNames)
+    ]]);
+    sheet.getRange(row, 1).setFontWeight("bold").setBackground("#fff2cc");
+    row++;
+  }
+  sheet.getRange(row, 1, 1, 3).setValues([["Position", "Code", "Driver"]])
+    .setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
+  row++;
+  breakdown.finishers.slice(0, 15).forEach(finisher => {
+    const position = parseInt(finisher.pos.replace(/\D/g, ""), 10) || finisher.pos;
+    sheet.getRange(row, 1, 1, 3).setValues([[
+      position,
+      finisher.driver,
+      getDriverLastName_(finisher.driver, driverNames)
+    ]]);
+    row++;
+  });
+  sheet.getRange(1, 1, Math.max(row - 1, 1), 3).setBorder(true, true, true, true, true, true, "#dadce0", SpreadsheetApp.BorderStyle.SOLID);
+
+  breakdown.players.forEach((player, index) => {
+    const groupRow = Math.floor(index / cardsPerRow);
+    const groupCol = index % cardsPerRow;
+    const startRow = cardsStartRow + groupRow * (cardRows + gap);
+    const startCol = 1 + groupCol * (cardCols + gap);
+    const rows = [
+      ["Player", "", "", "Points"],
+      [player.displayName, "Pole", getDriverLastName_(player.picks[0].driver, driverNames), player.picks[0].points]
+    ];
+    for (let i = 1; i <= 10; i++) {
+      const pick = player.picks[i] || { slot: String(i), driver: "", points: 0 };
+      rows.push(["", pick.slot, getDriverLastName_(pick.driver, driverNames), pick.points]);
+    }
+    rows.push(["", "Total", "", player.total]);
+
+    const range = sheet.getRange(startRow, startCol, cardRows, cardCols);
+    range.setValues(rows).setBackground("#ffffff").setFontColor("#202124")
+      .setBorder(true, true, true, true, true, true, "#dadce0", SpreadsheetApp.BorderStyle.SOLID);
+    sheet.getRange(startRow, startCol).setFontWeight("bold");
+    sheet.getRange(startRow, startCol + 3).setFontWeight("bold").setHorizontalAlignment("right");
+    sheet.getRange(startRow + 1, startCol).setFontWeight("bold");
+    sheet.getRange(startRow + cardRows - 1, startCol + 1).setFontWeight("bold");
+    sheet.getRange(startRow + cardRows - 1, startCol + 3).setFontWeight("bold");
+    sheet.getRange(startRow, startCol, 1, cardCols).setBackground("#f1f3f4");
+    sheet.getRange(startRow + cardRows - 1, startCol, 1, cardCols).setBackground("#fff2cc");
+    sheet.getRange(startRow, startCol + 3, cardRows, 1).setHorizontalAlignment("right");
+    sheet.getRange(startRow, startCol + 1, cardRows, 1).setHorizontalAlignment("center");
+  });
+
+  for (let col = 1; col <= usedColumns; col++) sheet.setColumnWidth(col, 115);
+  [1, 6, 11].forEach(col => sheet.setColumnWidth(col, 135));
+  [3, 8, 13].forEach(col => sheet.setColumnWidth(col, 185));
+  [5, 10].forEach(col => sheet.setColumnWidth(col, 28));
+  for (let gapRow = cardsStartRow + cardRows; gapRow <= usedRows; gapRow += cardRows + gap) sheet.setRowHeight(gapRow, 18);
+  sheet.setFrozenRows(0);
+  sheet.setFrozenColumns(0);
 }
 
 function writePublicPickSheet_(sheet, values) {

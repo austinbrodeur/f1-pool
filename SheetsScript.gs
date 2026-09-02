@@ -17,6 +17,7 @@
 const SCORING = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 const POLE_BONUS = 5;
 const TOP_FINISH_CUTOFF = 15;
+const RACE_WIN_POT = 25;
 const HEADER_BG = "#1a472a";
 const HEADER_FG = "#ffffff";
 
@@ -91,7 +92,7 @@ function initialSetup() {
   let cs = ss.getSheetByName("Race Calendar") || ss.insertSheet("Race Calendar");
   cs.clear();
   const calH = ["Round", "Race", "Race Date", "Day", "Picks Deadline",
-                 "Picks Sent?", "Pick Link", "Locked?", "Scored?", "Race Winner (Pool)"];
+                 "Picks Sent?", "Pick Link", "Locked?", "Scored?", "Race Winner(s) (Pool)"];
   cs.getRange(1, 1, 1, calH.length).setValues([calH])
     .setFontWeight("bold").setBackground(HEADER_BG).setFontColor(HEADER_FG);
   const calendarRows = config.races.map(race => [
@@ -111,7 +112,7 @@ function initialSetup() {
   let lb = ss.getSheetByName("Leaderboard") || ss.insertSheet("Leaderboard");
   lb.clear();
   lb.getRange(1, 1, 1, 5)
-    .setValues([["Rank", "Player", "Total Points", "Race Wins ($25)", "Best Race"]])
+    .setValues([["Rank", "Player", "Total Points", "Race Winnings", "Best Race"]])
     .setFontWeight("bold").setBackground(HEADER_BG).setFontColor(HEADER_FG);
 
   const s1 = ss.getSheetByName("Sheet1");
@@ -594,9 +595,11 @@ function scoreRace(roundNum) {
   }
 
   if (outRow > 2) scoreSheet.getRange(2, 1, outRow - 2, sHeaders.length).sort({ column: sHeaders.length, ascending: false });
+  let raceWinners = [];
   if (scores.length > 0) {
     scores.sort((a, b) => b.total - a.total);
-    scoreSheet.getRange(2, 1, 1, sHeaders.length).setBackground("#d4edda");
+    raceWinners = getRaceWinners_(scores);
+    if (raceWinners.length > 0) scoreSheet.getRange(2, 1, raceWinners.length, sHeaders.length).setBackground("#d4edda");
   }
 
   // Actual results reference
@@ -613,8 +616,9 @@ function scoreRace(roundNum) {
   const cs = ss.getSheetByName("Race Calendar");
   const calendarRow = getCalendarRow(ss, roundNum);
   if (calendarRow > 0) {
+    cs.getRange(1, 10).setValue("Race Winner(s) (Pool)");
     cs.getRange(calendarRow, 9).setValue("Yes");
-    if (scores.length > 0) cs.getRange(calendarRow, 10).setValue(scores[0].player + " (" + scores[0].total + " pts)");
+    if (raceWinners.length > 0) cs.getRange(calendarRow, 10).setValue(formatRaceWinnersSummary_(raceWinners));
   }
 
   recalculateLeaderboard();
@@ -623,7 +627,7 @@ function scoreRace(roundNum) {
   const carried = scores.filter(s => s.player.endsWith("*")).length;
   const sendEmail = ui.alert(
     `Scoring Complete: ${race.name}`,
-    (scores.length > 0 ? `🏆 Winner: ${scores[0].player} — ${scores[0].total} pts\n\n` : "") +
+    (raceWinners.length > 0 ? `🏆 ${formatRaceWinnersSummary_(raceWinners)}\n\n` : "") +
     `${scores.length} players scored.` +
     (carried > 0 ? `\n${carried} used carried-over picks (*).` : "") +
     "\n\nLeaderboard updated.\n\nEmail results to all players?",
@@ -631,6 +635,44 @@ function scoreRace(roundNum) {
   );
 
   if (sendEmail === ui.Button.YES) emailRaceResults(roundNum);
+}
+
+function getRaceWinners_(scores) {
+  if (!scores || scores.length === 0) return [];
+  const winningScore = scores[0].total;
+  if (!(winningScore > 0)) return [];
+  const winners = scores.filter(score => score.total === winningScore);
+  const payout = RACE_WIN_POT / winners.length;
+  return winners.map(winner => ({
+    player: winner.player,
+    name: winner.player.replace(/ \*$/, ""),
+    total: winner.total,
+    payout: payout
+  }));
+}
+
+function formatMoney_(amount) {
+  return "$" + (Math.round(amount * 100) / 100).toFixed(2).replace(/\.00$/, "");
+}
+
+function formatRaceWinnersSummary_(winners) {
+  if (!winners || winners.length === 0) return "";
+  const names = winners.map(winner => winner.player).join(" & ");
+  const score = winners[0].total;
+  const payout = formatMoney_(winners[0].payout);
+  if (winners.length === 1) return `Winner: ${names} — ${score} pts (${payout})`;
+  return `Tied Winners: ${names} — ${score} pts (${payout} each)`;
+}
+
+function assignCompetitionRanks_(results) {
+  let previousScore = null;
+  let previousRank = 0;
+  return results.map((result, index) => {
+    const rank = result.total === previousScore ? previousRank : index + 1;
+    previousScore = result.total;
+    previousRank = rank;
+    return Object.assign({}, result, { rank: rank });
+  });
 }
 
 // ── EMAIL RACE RESULTS ──────────────────────────────────────────────────────
@@ -662,14 +704,15 @@ function emailRaceResults(roundNum) {
   const scoreData = scoreSheet.getDataRange().getValues();
   const totalColIdx = scoreData[0].length - 1;
 
-  const playerResults = [];
+  let playerResults = [];
   let actualResultsStart = -1, actualPole = "";
   for (let i = 1; i < scoreData.length; i++) {
     const name = (scoreData[i][0] || "").toString().trim();
     if (!name) continue;
     if (name === "ACTUAL RESULTS") { actualResultsStart = i; actualPole = (scoreData[i][1] || "").toString().replace("Pole: ", ""); break; }
-    playerResults.push({ name, total: parseFloat(scoreData[i][totalColIdx]) || 0, rank: playerResults.length + 1 });
+    playerResults.push({ name, total: parseFloat(scoreData[i][totalColIdx]) || 0 });
   }
+  playerResults = assignCompetitionRanks_(playerResults);
 
   const actualFinishers = [];
   if (actualResultsStart > 0) {
@@ -699,7 +742,7 @@ function emailRaceResults(roundNum) {
   } catch (e) {
     Logger.log(`Public results refresh failed before email: ${e.message}`);
   }
-  const raceWinner = playerResults.length > 0 ? playerResults[0] : null;
+  const raceWinners = getRaceWinners_(playerResults.map(result => ({ player: result.name, total: result.total })));
   let emailsSent = 0;
 
   playersWithEmail.forEach(player => {
@@ -710,7 +753,7 @@ function emailRaceResults(roundNum) {
       MailApp.sendEmail({
         to: player.email,
         subject: `🏁 ${poolName} Results — R${race.round}: ${race.name}`,
-        htmlBody: buildResultsEmail(player.name, race, poolName, playerResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl, masterResultsUrl, driverNames, myBreakdown)
+        htmlBody: buildResultsEmail(player.name, race, poolName, playerResults, myResult, myStanding, actualFinishers, actualPole, raceWinners, standings, resultsSheetUrl, masterResultsUrl, driverNames, myBreakdown)
       });
       emailsSent++;
     } catch(e) { Logger.log(`Failed to email results to ${player.name}: ${e.message}`); }
@@ -783,20 +826,41 @@ function escapeHtml_(value) {
     .replace(/'/g, "&#39;");
 }
 
-function buildResultsEmail(playerName, race, poolName, allResults, myResult, myStanding, actualFinishers, actualPole, raceWinner, standings, resultsSheetUrl, masterResultsUrl, driverNames, myBreakdown) {
+function buildResultsEmail(playerName, race, poolName, allResults, myResult, myStanding, actualFinishers, actualPole, raceWinners, standings, resultsSheetUrl, masterResultsUrl, driverNames, myBreakdown) {
   const top10Rows = allResults.slice(0, 10).map((p, i) => {
     const isMe = p.name.replace(/ \*$/, "") === playerName;
-    const bg = i === 0 ? "rgba(0, 212, 170, 0.15)" : (isMe ? "rgba(212, 160, 23, 0.15)" : (i % 2 === 0 ? "#1c1c1c" : "#161616"));
-    const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
-    const borderColor = i === 0 ? "#00d4aa" : (isMe ? "#d4a017" : "#2a2a2a");
+    const isWinner = p.rank === 1;
+    const bg = isWinner ? "rgba(0, 212, 170, 0.15)" : (isMe ? "rgba(212, 160, 23, 0.15)" : (i % 2 === 0 ? "#1c1c1c" : "#161616"));
+    const medal = p.rank === 1 ? "🥇" : p.rank === 2 ? "🥈" : p.rank === 3 ? "🥉" : `${p.rank}.`;
+    const borderColor = isWinner ? "#00d4aa" : (isMe ? "#d4a017" : "#2a2a2a");
     return `<tr style="background:${bg};border-left:3px solid ${borderColor};"><td style="padding:8px 12px;border-bottom:1px solid #2a2a2a;color:#b8b8b8;">${medal}</td><td style="padding:8px 12px;border-bottom:1px solid #2a2a2a;${isMe ? "font-weight:bold;color:#00d4aa;" : "color:#e8e8e8;"}">${p.name}${isMe ? " ← You" : ""}</td><td style="padding:8px 12px;border-bottom:1px solid #2a2a2a;text-align:right;font-weight:bold;color:#e8e8e8;">${p.total}</td></tr>`;
   }).join("");
+
+  const raceWinnerSection = raceWinners && raceWinners.length > 0
+    ? `<div style="background:rgba(0, 212, 170, 0.15);border-left:4px solid #00d4aa;border-radius:6px;padding:16px;margin:20px 0;text-align:center;"><strong style="font-size:17px;color:#00d4aa;">🏆 ${escapeHtml_(formatRaceWinnersSummary_(raceWinners))}</strong></div>`
+    : "";
 
   const mySection = myResult
     ? `<div style="background:rgba(212, 160, 23, 0.15);border-left:4px solid #d4a017;border-radius:6px;padding:16px;margin:20px 0;"><strong style="color:#d4a017;font-size:16px;">Your Score: ${myResult.total} pts</strong> <span style="color:#b8b8b8;">— Ranked <strong style="color:#e8e8e8;">#${myResult.rank}</strong> of ${allResults.length}</span></div>`
     : `<div style="background:rgba(225, 6, 0, 0.15);border-left:4px solid #e10600;border-radius:6px;padding:16px;margin:20px 0;color:#e8e8e8;">You did not have scored picks for this race.</div>`;
 
-  const resultsList = actualFinishers.slice(0, 10).map(f => `${f.pos}: <strong style="color:#e8e8e8;">${f.driver}</strong> <span style="color:#777;">${driverNames[f.driver] || f.driver}</span>`).join(" &nbsp;|&nbsp; ");
+  const actualResultRows = [
+    actualPole ? `<tr style="background:#161616;border-left:3px solid #9b59b6;"><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#d4a017;font-weight:bold;">Pole</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#e8e8e8;font-weight:bold;">${escapeHtml_(actualPole)}</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#777;">${escapeHtml_(driverNames[actualPole] || actualPole)}</td></tr>` : "",
+    ...actualFinishers.map((finisher, index) => {
+      const bg = index % 2 === 0 ? "#1c1c1c" : "#161616";
+      const posNum = parseInt(finisher.pos.replace(/\D/g, ""), 10);
+      const posColor = posNum === 1 ? "#ffd700" : posNum === 2 ? "#c0c0c0" : posNum === 3 ? "#cd7f32" : "#b8b8b8";
+      return `<tr style="background:${bg};"><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:${posColor};font-weight:bold;">${escapeHtml_(finisher.pos)}</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#e8e8e8;font-weight:bold;">${escapeHtml_(finisher.driver)}</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#777;">${escapeHtml_(driverNames[finisher.driver] || finisher.driver)}</td></tr>`;
+    })
+  ].join("");
+
+  const actualResultSection = actualFinishers.length > 0
+    ? `<h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Actual Race Result</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;overflow:hidden;">
+              <tr style="background:#1a472a;color:white;"><th style="padding:7px 10px;text-align:left;width:64px;">Pos</th><th style="padding:7px 10px;text-align:left;width:72px;">Code</th><th style="padding:7px 10px;text-align:left;">Driver</th></tr>
+              ${actualResultRows}
+            </table>`
+    : "";
 
   const pickBreakdownRows = myBreakdown ? [
     `<tr style="background:#161616;border-left:3px solid ${myBreakdown.pole.points > 0 ? "#9b59b6" : "#2a2a2a"};"><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#d4a017;font-weight:bold;">Pole</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#e8e8e8;">${escapeHtml_(myBreakdown.pole.actual || "—")}</td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;color:#e8e8e8;"><strong>${escapeHtml_(myBreakdown.pole.pick || "—")}</strong></td><td style="padding:7px 10px;border-bottom:1px solid #2a2a2a;text-align:right;font-weight:bold;color:${myBreakdown.pole.points > 0 ? "#00d4aa" : "#777"};">${myBreakdown.pole.points}</td></tr>`,
@@ -847,7 +911,7 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
           <div style="background:#161616;padding:32px 24px;color:#e8e8e8;">
             <p style="margin:0 0 16px;font-size:15px;">Hey <strong style="color:#00d4aa;">${playerName}</strong>,</p>
             <p style="margin:0 0 20px;font-size:15px;line-height:1.6;">The scores are in for the <strong>${race.name}</strong></p>
-            ${raceWinner ? `<div style="background:rgba(0, 212, 170, 0.15);border-left:4px solid #00d4aa;border-radius:6px;padding:16px;margin:20px 0;text-align:center;"><strong style="font-size:17px;color:#00d4aa;">🏆 Race Winner: ${raceWinner.name} — ${raceWinner.total} pts ($25)</strong></div>` : ""}
+            ${raceWinnerSection}
             ${mySection}
             <div style="margin:24px 0;text-align:center;">
               <a href="${resultsSheetUrl}" style="display:inline-block;background:#00d4aa;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">View All Picks &amp; Full Results</a>
@@ -861,7 +925,7 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
               ${allResults.length > 10 ? `<tr><td colspan="3" style="padding:8px 12px;color:#777;font-size:12px;background:#0d0d0d;">...and ${allResults.length - 10} more</td></tr>` : ""}
             </table>
             ${pickBreakdownSection}
-            ${actualFinishers.length > 0 ? `<h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Actual Race Result</h3><p style="font-size:13px;color:#b8b8b8;line-height:1.8;background:#0d0d0d;padding:12px;border-radius:6px;border:1px solid #2a2a2a;">${actualPole ? `<strong style="color:#d4a017;">Pole:</strong> <span style="color:#e8e8e8;">${actualPole}</span> &nbsp;|&nbsp; ` : ""}${resultsList}</p>` : ""}
+            ${actualResultSection}
             <h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Season Standings</h3>
             <table style="width:100%;border-collapse:collapse;font-size:13px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;overflow:hidden;">
               <tr style="background:#1a472a;color:white;"><th style="padding:6px 10px;text-align:left;width:40px;">#</th><th style="padding:6px 10px;text-align:left;">Player</th><th style="padding:6px 10px;text-align:right;">Total</th></tr>
@@ -890,34 +954,52 @@ function recalculateLeaderboard() {
   if (scoredRaces.length === 0) { lb.getRange(1, 1).setValue("No races scored yet."); return; }
 
   const stats = {};
+  const calendarSheet = ss.getSheetByName("Race Calendar");
+  if (calendarSheet) calendarSheet.getRange(1, 10).setValue("Race Winner(s) (Pool)");
 
   scoredRaces.forEach(race => {
     const sheet = ss.getSheetByName(`R${race.round} Scores`);
     const data = sheet.getDataRange().getValues();
     let high = 0;
+    let highCount = 0;
 
     for (let i = 1; i < data.length; i++) {
       if (!data[i][0] || data[i][0] === "ACTUAL RESULTS") break;
       const t = parseFloat(data[i][data[i].length - 1]) || 0;
       if (t > high) high = t;
     }
+    for (let i = 1; i < data.length; i++) {
+      if (!data[i][0] || data[i][0] === "ACTUAL RESULTS") break;
+      const t = parseFloat(data[i][data[i].length - 1]) || 0;
+      if (t === high && high > 0) highCount++;
+    }
+    const winnerPayout = highCount > 0 ? RACE_WIN_POT / highCount : 0;
+    const raceWinnersForCalendar = [];
 
     for (let i = 1; i < data.length; i++) {
       let name = (data[i][0] || "").toString().trim();
       if (!name || name === "ACTUAL RESULTS") break;
       const clean = name.replace(/ \*$/, "");
-      if (!stats[clean]) stats[clean] = { total: 0, wins: 0, best: 0, raceScores: {} };
+      if (!stats[clean]) stats[clean] = { total: 0, winnings: 0, best: 0, raceScores: {} };
       const t = parseFloat(data[i][data[i].length - 1]) || 0;
       stats[clean].total += t;
       stats[clean].raceScores[race.round] = t;
       if (t > stats[clean].best) stats[clean].best = t;
-      if (t === high && high > 0) stats[clean].wins++;
+      if (t === high && high > 0) {
+        stats[clean].winnings += winnerPayout;
+        raceWinnersForCalendar.push({ player: name, name: clean, total: t, payout: winnerPayout });
+      }
+    }
+
+    const calendarRow = calendarSheet ? getCalendarRow(ss, race.round) : -1;
+    if (calendarRow > 0 && raceWinnersForCalendar.length > 0) {
+      calendarSheet.getRange(calendarRow, 10).setValue(formatRaceWinnersSummary_(raceWinnersForCalendar));
     }
   });
 
   const sorted = Object.entries(stats).sort((a, b) => b[1].total - a[1].total);
 
-  const baseHeaders = ["Rank", "Player", "Total Points", "Race Wins ($25)", "Best Race"];
+  const baseHeaders = ["Rank", "Player", "Total Points", "Race Winnings", "Best Race"];
   const raceHeaders = scoredRaces.map(r => `R${r.round}`);
   const allHeaders = [...baseHeaders, ...raceHeaders];
   const totalCols = allHeaders.length;
@@ -928,7 +1010,7 @@ function recalculateLeaderboard() {
   const colors = ["#ffd700", "#c0c0c0", "#cd7f32", "#d4edda", "#d4edda", "#d4edda"];
   sorted.forEach(([name, s], i) => {
     const row = i + 2;
-    const rowData = [i + 1, name, Math.round(s.total * 10) / 10, s.wins, s.best];
+    const rowData = [i + 1, name, Math.round(s.total * 10) / 10, Math.round(s.winnings * 100) / 100, s.best];
     scoredRaces.forEach(race => rowData.push(s.raceScores[race.round] || 0));
     lb.getRange(row, 1, 1, totalCols).setValues([rowData]);
     if (i < 6) lb.getRange(row, 1, 1, totalCols).setBackground(colors[i]);
@@ -941,6 +1023,7 @@ function recalculateLeaderboard() {
   if (sorted.length > 0) {
     lb.getRange(2, 1, sorted.length, 1).setHorizontalAlignment("center");
     lb.getRange(2, 3, sorted.length, totalCols - 2).setHorizontalAlignment("center");
+    lb.getRange(2, 4, sorted.length, 1).setNumberFormat("$0.00");
   }
 
   lb.setFrozenRows(1);

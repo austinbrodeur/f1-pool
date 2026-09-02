@@ -130,6 +130,7 @@ Access via "F1 Pool" menu in Google Sheets:
 - No points for drivers finishing outside top 15
 - Partial races: Points × (laps completed / laps scheduled)
 - **Carry-over:** If no valid picks submitted, uses previous race picks (marked with *)
+- **Race win pot:** The $25 race win pot is split evenly among all players tied for the top score
 
 ## Configuration
 
