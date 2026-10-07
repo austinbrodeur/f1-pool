@@ -97,7 +97,7 @@ function syncPublicResults_(sourceSs) {
     if (!sourcePickSheetName) return;
     const sourcePickSheet = sourceSs.getSheetByName(sourcePickSheetName);
     const targetSheet = ensurePublicSheet_(publicSs, makePublicPickSheetName_(race));
-    writePublicPickSheet_(targetSheet, sourcePickSheet.getDataRange().getValues());
+    writePublicPickSheet_(targetSheet, sourcePickSheet.getDataRange().getValues(), race, driverNames);
     pickUrls[race.round] = makePublicSheetUrl_(publicBaseUrl, targetSheet.getSheetId());
   });
 
@@ -441,7 +441,10 @@ function writeOurRaceChart_(sheet, model) {
     .setOption("height", 720)
     .setOption("legend", { position: "right", textStyle: { fontSize: 9 } })
     .setOption("pointSize", 3)
-    .setOption("vAxis", { viewWindow: { min: 1, max: model.sortedPlayers.length } })
+    .setOption("vAxis", {
+      direction: -1,
+      viewWindow: { min: 1, max: model.sortedPlayers.length }
+    })
     .setOption("hAxis", { slantedText: true, slantedTextAngle: 35 })
     .build();
   sheet.insertChart(chart);
@@ -466,6 +469,14 @@ function writePointsChart_(sheet, model) {
     "#00d4aa", "#e10600", "#d4a017", "#9b59b6", "#3498db", "#f39c12",
     "#2ecc71", "#e67e22", "#1abc9c", "#e84393", "#95a5a6", "#c0392b"
   ];
+  const pointTotals = chartPlayers.map(name => model.totals[name] || 0);
+  let axisMin = Math.min.apply(null, pointTotals);
+  let axisMax = Math.max.apply(null, pointTotals);
+  if (axisMin === axisMax) {
+    const padding = Math.max(1, Math.abs(axisMax) * 0.01);
+    axisMin = Math.max(0, axisMin - padding);
+    axisMax += padding;
+  }
   ensurePublicGridSize_(sheet, rows.length, dataColumn + chartPlayers.length);
   sheet.getRange(1, dataColumn, rows.length, chartPlayers.length + 1).setValues(rows);
 
@@ -479,7 +490,9 @@ function writePointsChart_(sheet, model) {
     .setOption("height", Math.max(650, model.sortedPlayers.length * 24))
     .setOption("legend", { position: "none" })
     .setOption("colors", chartPlayers.map((_, index) => palette[index % palette.length]))
-    .setOption("hAxis", { title: "Points", minValue: 0 })
+    .setOption("isStacked", true)
+    .setOption("bar", { groupWidth: "95%" })
+    .setOption("hAxis", { title: "Points", viewWindow: { min: axisMin, max: axisMax } })
     .build();
   sheet.insertChart(chart);
 }
@@ -552,6 +565,39 @@ function buildPublicRaceBreakdown_(result) {
   };
 }
 
+function buildPublicPickBreakdown_(values) {
+  if (values.length < 2) return { actualPole: "", finishers: [], players: [] };
+  const headers = values[1].map(header => String(header || "").trim());
+  const playerCol = headers.indexOf("Player");
+  const statusCol = headers.indexOf("Status");
+  const poleCol = headers.indexOf("Pole");
+  const pickCols = [];
+  for (let pos = 1; pos <= 10; pos++) pickCols.push(headers.indexOf(`P${pos}`));
+
+  const players = [];
+  for (let i = 2; i < values.length; i++) {
+    const name = playerCol >= 0 ? String(values[i][playerCol] || "").trim() : "";
+    if (!name) continue;
+    const status = statusCol >= 0 ? String(values[i][statusCol] || "") : "";
+    const displayName = status.includes("📋") ? `${name} *` : name;
+    const picks = [{
+      slot: "Pole",
+      driver: poleCol >= 0 ? String(values[i][poleCol] || "").trim() : "",
+      points: ""
+    }];
+    pickCols.forEach((col, index) => {
+      picks.push({
+        slot: String(index + 1),
+        driver: col >= 0 ? String(values[i][col] || "").trim() : "",
+        points: ""
+      });
+    });
+    players.push({ displayName: displayName, picks: picks, total: "" });
+  }
+
+  return { actualPole: "", finishers: [], players: players };
+}
+
 function getDriverLastName_(driverCode, driverNames) {
   const name = String((driverNames && driverNames[driverCode]) || driverCode || "").trim();
   if (!name) return "";
@@ -561,18 +607,32 @@ function getDriverLastName_(driverCode, driverNames) {
 }
 
 function writePublicRaceSheet_(sheet, result, driverNames) {
-  resetPublicSheet_(sheet);
-  if (result.values.length === 0 || result.values[0].length === 0) return;
+  if (result.values.length === 0 || result.values[0].length === 0) {
+    resetPublicSheet_(sheet);
+    return;
+  }
   const breakdown = buildPublicRaceBreakdown_(result);
+  writePublicRaceDashboard_(sheet, result.race, breakdown, driverNames, true);
+}
+
+function writePublicRaceDashboard_(sheet, race, breakdown, driverNames, highlightWinners) {
+  resetPublicSheet_(sheet);
   const cardsPerRow = 3;
   const cardRows = 13;
   const cardCols = 4;
   const gap = 1;
   const actualStartRow = 1;
-  const actualHeaderRows = 2;
-  const actualRows = Math.max(15, breakdown.finishers.length) + actualHeaderRows + (breakdown.actualPole ? 1 : 0);
+  const actualRows = Math.max(15, breakdown.finishers.length) + 3;
   const cardsStartRow = actualStartRow + actualRows + 2;
   const cardRowGroups = Math.ceil(breakdown.players.length / cardsPerRow);
+  const winningScore = breakdown.players.length > 0
+    ? Math.max.apply(null, breakdown.players.map(player => player.total))
+    : 0;
+  const winners = highlightWinners && winningScore > 0
+    ? breakdown.players.filter(player => player.total === winningScore)
+    : [];
+  const winnerFill = winners.length > 1 ? "#e6f4ea" : "#d9ead3";
+  const winnerAccentFill = winners.length > 1 ? "#d9ead3" : "#b7e1cd";
   const usedRows = Math.max(cardsStartRow + Math.max(cardRowGroups, 1) * (cardRows + gap), actualRows + 1);
   const usedColumns = cardsPerRow * cardCols + (cardsPerRow - 1) * gap;
   ensurePublicGridSize_(sheet, usedRows, usedColumns);
@@ -580,30 +640,31 @@ function writePublicRaceSheet_(sheet, result, driverNames) {
   sheet.getRange(1, 1, usedRows, usedColumns).setBackground("#ffffff").setFontColor("#202124");
   sheet.setHiddenGridlines(false);
 
-  sheet.getRange(1, 1, 1, 4).setValues([[`Round ${result.race.round}`, result.race.name, "Actual Results", ""]])
+  sheet.getRange(1, 1, 1, 4).setValues([[`Round ${race.round}`, race.name, "Actual Results", ""]])
     .setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
   let row = 2;
-  if (breakdown.actualPole) {
-    sheet.getRange(row, 1, 1, 3).setValues([[
-      "Pole",
-      breakdown.actualPole,
-      getDriverLastName_(breakdown.actualPole, driverNames)
-    ]]);
-    sheet.getRange(row, 1).setFontWeight("bold").setBackground("#fff2cc");
-    row++;
-  }
+  sheet.getRange(row, 1, 1, 3).setValues([[
+    "Pole",
+    breakdown.actualPole,
+    getDriverLastName_(breakdown.actualPole, driverNames)
+  ]]);
+  sheet.getRange(row, 1).setFontWeight("bold").setBackground("#fff2cc");
+  row++;
   sheet.getRange(row, 1, 1, 3).setValues([["Position", "Code", "Driver"]])
     .setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
   row++;
-  breakdown.finishers.slice(0, 15).forEach(finisher => {
-    const position = parseInt(finisher.pos.replace(/\D/g, ""), 10) || finisher.pos;
+  const resultRows = Math.max(15, breakdown.finishers.length);
+  for (let index = 0; index < resultRows; index++) {
+    const finisher = breakdown.finishers[index];
+    const position = finisher ? (parseInt(finisher.pos.replace(/\D/g, ""), 10) || finisher.pos) : index + 1;
+    const driver = finisher ? finisher.driver : "";
     sheet.getRange(row, 1, 1, 3).setValues([[
       position,
-      finisher.driver,
-      getDriverLastName_(finisher.driver, driverNames)
+      driver,
+      getDriverLastName_(driver, driverNames)
     ]]);
     row++;
-  });
+  }
   sheet.getRange(1, 1, Math.max(row - 1, 1), 3).setBorder(true, true, true, true, true, true, "#dadce0", SpreadsheetApp.BorderStyle.SOLID);
 
   breakdown.players.forEach((player, index) => {
@@ -622,15 +683,16 @@ function writePublicRaceSheet_(sheet, result, driverNames) {
     rows.push(["", "Total", "", player.total]);
 
     const range = sheet.getRange(startRow, startCol, cardRows, cardCols);
-    range.setValues(rows).setBackground("#ffffff").setFontColor("#202124")
+    const isWinner = winners.indexOf(player) >= 0;
+    range.setValues(rows).setBackground(isWinner ? winnerFill : "#ffffff").setFontColor("#202124")
       .setBorder(true, true, true, true, true, true, "#dadce0", SpreadsheetApp.BorderStyle.SOLID);
     sheet.getRange(startRow, startCol).setFontWeight("bold");
     sheet.getRange(startRow, startCol + 3).setFontWeight("bold").setHorizontalAlignment("right");
     sheet.getRange(startRow + 1, startCol).setFontWeight("bold");
     sheet.getRange(startRow + cardRows - 1, startCol + 1).setFontWeight("bold");
     sheet.getRange(startRow + cardRows - 1, startCol + 3).setFontWeight("bold");
-    sheet.getRange(startRow, startCol, 1, cardCols).setBackground("#f1f3f4");
-    sheet.getRange(startRow + cardRows - 1, startCol, 1, cardCols).setBackground("#fff2cc");
+    sheet.getRange(startRow, startCol, 1, cardCols).setBackground(isWinner ? winnerAccentFill : "#f1f3f4");
+    sheet.getRange(startRow + cardRows - 1, startCol, 1, cardCols).setBackground(isWinner ? winnerAccentFill : "#fff2cc");
     sheet.getRange(startRow, startCol + 3, cardRows, 1).setHorizontalAlignment("right");
     sheet.getRange(startRow, startCol + 1, cardRows, 1).setHorizontalAlignment("center");
   });
@@ -644,23 +706,11 @@ function writePublicRaceSheet_(sheet, result, driverNames) {
   sheet.setFrozenColumns(0);
 }
 
-function writePublicPickSheet_(sheet, values) {
-  resetPublicSheet_(sheet);
-  if (values.length === 0 || values[0].length === 0) return;
-  const rows = values.length;
-  const columns = values[0].length;
-  ensurePublicGridSize_(sheet, rows, columns);
-  sheet.getRange(1, 1, rows, columns).setValues(values);
-  sheet.getRange(1, 1, 1, columns).setBackground("#ffffff").setFontColor("#202124").setFontWeight("bold");
-  if (rows > 1) {
-    sheet.getRange(2, 1, 1, columns).setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold");
+function writePublicPickSheet_(sheet, values, race, driverNames) {
+  if (values.length === 0 || values[0].length === 0) {
+    resetPublicSheet_(sheet);
+    return;
   }
-  if (rows > 2) {
-    sheet.getRange(3, 1, rows - 2, columns).setBackground("#ffffff").setFontColor("#202124");
-  }
-  sheet.setFrozenRows(Math.min(2, rows));
-  sheet.setFrozenColumns(1);
-  sheet.autoResizeColumns(1, columns);
-  sheet.setColumnWidth(1, 180);
-  if (columns >= 2) sheet.setColumnWidth(2, 160);
+  const breakdown = buildPublicPickBreakdown_(values);
+  writePublicRaceDashboard_(sheet, race, breakdown, driverNames, false);
 }
