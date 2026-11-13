@@ -459,7 +459,7 @@ function buildLockedPicksEmail_(playerName, race, poolName, pickUrl, summaryUrl)
             <p style="margin:0 0 14px;text-align:left;">Hey <strong style="color:#00d4aa;">${playerName}</strong>,</p>
             <p style="margin:0 0 24px;text-align:left;line-height:1.6;">Picks are now locked and visible to the pool. You can review everyone&rsquo;s selections before the race begins.</p>
             <a href="${pickUrl}" style="display:inline-block;background:#00d4aa;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">View Everyone&rsquo;s Picks</a>
-            ${summaryUrl ? `<br><a href="${summaryUrl}" style="display:inline-block;margin-top:12px;background:#d4a017;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">Open Season Master</a>` : ""}
+            ${summaryUrl ? `<br><a href="${summaryUrl}" style="display:inline-block;margin-top:12px;background:#d4a017;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">Open Full Season Results</a>` : ""}
           </div>
           <div style="background:#0a0a0a;color:#777;padding:16px;text-align:center;font-size:12px;">${poolName}</div>
         </div>
@@ -916,7 +916,7 @@ function buildResultsEmail(playerName, race, poolName, allResults, myResult, myS
             <div style="margin:24px 0;text-align:center;">
               <a href="${resultsSheetUrl}" style="display:inline-block;background:#00d4aa;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">View All Picks &amp; Full Results</a>
               <p style="margin:10px 0 0;color:#777;font-size:12px;line-height:1.5;">Open the race results sheet to see everyone&rsquo;s picks and scoring breakdown.</p>
-              ${masterResultsUrl ? `<a href="${masterResultsUrl}" style="display:inline-block;margin-top:12px;background:#d4a017;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">Open Season Master</a>` : ""}
+              ${masterResultsUrl ? `<a href="${masterResultsUrl}" style="display:inline-block;margin-top:12px;background:#d4a017;color:#0d0d0d;text-decoration:none;font-size:14px;font-weight:800;padding:12px 20px;border-radius:6px;">Open Full Season Results</a>` : ""}
             </div>
             <h3 style="color:#00d4aa;margin:24px 0 12px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Race Scoreboard (Top 10)</h3>
             <table style="width:100%;border-collapse:collapse;font-size:13px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;overflow:hidden;">

@@ -401,6 +401,23 @@ function writePublicSummary_(sheet, settings, model) {
     sheet.getRange(4, 3, scoreRows.length, scoreHeaders.length - 2).setHorizontalAlignment("center");
     sheet.getRange(4, scoreHeaders.length, scoreRows.length, 1).setNumberFormat("$0.00");
     sheet.getRange(4, 1, 1, scoreHeaders.length).setBackground("#fff2cc").setFontColor("#202124").setFontWeight("bold");
+
+    model.races.forEach((race, raceIndex) => {
+      const roundScores = model.scoreByRound[race.round];
+      if (!roundScores) return;
+      const scores = model.sortedPlayers.map(name => roundScores[name] || 0);
+      const highestScore = Math.max.apply(null, scores);
+      if (!(highestScore > 0)) return;
+      const winnerIndexes = [];
+      scores.forEach((score, playerIndex) => {
+        if (score === highestScore) winnerIndexes.push(playerIndex);
+      });
+      const winnerFill = winnerIndexes.length > 1 ? "#e6f4ea" : "#d9ead3";
+      const scoreColumn = 3 + raceIndex;
+      winnerIndexes.forEach(playerIndex => {
+        sheet.getRange(4 + playerIndex, scoreColumn).setBackground(winnerFill).setFontWeight("bold");
+      });
+    });
   }
   sheet.setFrozenRows(3);
   // Freeze before column B so no merged callout range crosses the boundary.
@@ -422,14 +439,25 @@ function writeOurRaceChart_(sheet, model) {
 
   const dataColumn = 27;
   const chartPlayers = model.sortedPlayers;
+  const playerCount = chartPlayers.length;
   const header = ["Race", ...chartPlayers];
+  // Plot negative positions so first place is physically highest even when
+  // Google Sheets ignores the embedded chart's vAxis.direction option.
   const rows = model.raceResults.map(result => [
     result.race.name,
-    ...chartPlayers.map(name => model.ranksByRound[result.race.round][name])
+    ...chartPlayers.map(name => {
+      const position = model.ranksByRound[result.race.round][name];
+      return -position;
+    })
   ]);
+  const positionTicks = Array.from({ length: playerCount }, (_, index) => index - playerCount);
+  const positionViewWindow = playerCount === 1
+    ? { min: -1.5, max: -0.5 }
+    : { min: -playerCount, max: -1 };
   ensurePublicGridSize_(sheet, rows.length + 1, dataColumn + header.length - 1);
   sheet.getRange(1, dataColumn, 1, header.length).setValues([header]);
   sheet.getRange(2, dataColumn, rows.length, header.length).setValues(rows);
+  sheet.getRange(2, dataColumn + 1, rows.length, chartPlayers.length).setNumberFormat("0;0");
 
   const chart = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
@@ -442,8 +470,10 @@ function writeOurRaceChart_(sheet, model) {
     .setOption("legend", { position: "right", textStyle: { fontSize: 9 } })
     .setOption("pointSize", 3)
     .setOption("vAxis", {
-      direction: -1,
-      viewWindow: { min: 1, max: model.sortedPlayers.length }
+      title: "Position",
+      format: "0;0",
+      ticks: positionTicks,
+      viewWindow: positionViewWindow
     })
     .setOption("hAxis", { slantedText: true, slantedTextAngle: 35 })
     .build();
@@ -697,9 +727,10 @@ function writePublicRaceDashboard_(sheet, race, breakdown, driverNames, highligh
     sheet.getRange(startRow, startCol + 1, cardRows, 1).setHorizontalAlignment("center");
   });
 
-  for (let col = 1; col <= usedColumns; col++) sheet.setColumnWidth(col, 115);
-  [1, 6, 11].forEach(col => sheet.setColumnWidth(col, 135));
-  [3, 8, 13].forEach(col => sheet.setColumnWidth(col, 185));
+  [1, 6, 11].forEach(col => sheet.setColumnWidth(col, 85));
+  [2, 7, 12].forEach(col => sheet.setColumnWidth(col, 116));
+  [3, 8, 13].forEach(col => sheet.setColumnWidth(col, 115));
+  [4, 9, 14].forEach(col => sheet.setColumnWidth(col, 58));
   [5, 10].forEach(col => sheet.setColumnWidth(col, 28));
   for (let gapRow = cardsStartRow + cardRows; gapRow <= usedRows; gapRow += cardRows + gap) sheet.setRowHeight(gapRow, 18);
   sheet.setFrozenRows(0);
